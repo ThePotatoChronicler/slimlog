@@ -147,11 +147,12 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
         },
         "control" => ins.extend(control_function(&statement.arguments)?),
         "do" => ins.extend(do_function(&statement.arguments)?),
-        "getlink" => ins.extend(getlink_function(&statement.arguments)?),
+        "getlink" => ins.extend(getlink_function(&statement.arguments, ret)?),
         "iterlinks" => ins.extend(iterlinks_function(&statement.arguments)?),
         "printflush" => ins.push(printflush_function(&statement.arguments)?),
         "while" => ins.extend(while_function(&statement.arguments)?),
         "set" => ins.extend(set_function(&statement.arguments)?),
+        "sensor" => ins.extend(sensor_function(&statement.arguments, ret)?),
         "_raw" => ins.push(raw_function(&statement.arguments)?),
         _ => matched = false
     };
@@ -252,8 +253,7 @@ pub fn make_expression(opr: Operation, args: &[Argument], ret: Option<&Vec<&str>
     };
 
     if let Some(returnarg) = get_return_for_expression(ret) {
-        ins.push(
-            Ins::Op(opr,[returnarg, arg0, if opr.unary() { Arg::Literal(Type::Num(0.0)) } else { arg1.unwrap() }]))
+        ins.push(Ins::Op(opr,[returnarg, arg0, if opr.unary() { Arg::Literal(Type::Num(0.0)) } else { arg1.unwrap() }]))
     }
 
     Ok(ins)
@@ -352,10 +352,14 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             }
 
             let opr_as_cmp: Comparison = (*opr).try_into().ok()?;
+            if opr_as_cmp == Comparison::StrictEquals || opr_as_cmp == Comparison::Always {
+                return None;
+            }
+
             if result == jarg0 {
                 if let Arg::Literal(Type::Num(other)) = jarg1 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump(*label, opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
+                        return Some(Ins::Jump(*label, -opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
                     }
                 }
             }
@@ -363,7 +367,7 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if result == jarg1 {
                 if let Arg::Literal(Type::Num(other)) = jarg0 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump(*label, opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
+                        return Some(Ins::Jump(*label, -opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
                     }
                 }
             }
@@ -390,28 +394,25 @@ fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     None
 }
 
-fn getlink_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
-    if args.len() != 2 {
-        return Err("getlink function accepts exactly two arguments".into())
+fn getlink_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
+    if args.len() != 1 {
+        return Err("getlink function accepts exactly one argument".into())
     }
 
     let mut ins = Vec::new();
 
-    if let Argument::Identifier(ident1) = &args[0] {
-        let arg2 = match &args[1] {
-            Argument::Identifier(ident2) => make_variable(ident2),
-            Argument::Number(num) => make_literal_num(num),
-            Argument::String(_) => return Err("Second argument to getlink function cannot be a string".into()),
-            Argument::Statement(stmnt) => {
-                let ret = generate_variable();
-                ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
-                str_to_var(ret)
-            }
-        };
-        ins.push(Ins::GetLink([make_variable(ident1), arg2]));
-    } else {
-        return Err("First argument to getlink must be a variable".into());
-    }
+    let arg = match &args[0] {
+        Argument::Identifier(ident) => make_variable(ident),
+        Argument::Number(num) => make_literal_num(num),
+        Argument::String(_) => return Err("The argument to getlink function cannot be a string".into()),
+        Argument::Statement(stmnt) => {
+            let ret = generate_variable();
+            ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
+            str_to_var(ret)
+        }
+    };
+
+    ins.push(Ins::GetLink([ret_or_null(ret), arg]));
 
     Ok(ins)
 }
@@ -458,6 +459,10 @@ fn printflush_function(args: &[Argument]) -> Result<Ins, String> {
     }
 }
 
+fn sensor_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
+    todo!("sensor")
+}
+
 fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
-    todo!()
+    todo!("control")
 }

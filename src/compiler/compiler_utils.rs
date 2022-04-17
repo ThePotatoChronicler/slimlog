@@ -7,12 +7,12 @@ use super::{
     }
 };
 
+use log::warn;
+
 lazy_static::lazy_static! {
     static ref VARSEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     static ref LABELSEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 }
-
-use log::warn;
 
 pub fn expect_identifier<'a, 'b>(arg: &'a Argument, err: &'b str) -> Result<Span<'a>, String> {
     match arg {
@@ -48,6 +48,10 @@ pub fn one() -> Arg {
     Arg::Literal(Type::Num(1.0))
 }
 
+pub fn null() -> Arg {
+    str_to_var("null")
+}
+
 pub fn str_to_var<T: std::convert::AsRef<str>>(string: T) -> Arg {
     Variable(string.as_ref().to_owned())
 }
@@ -78,6 +82,23 @@ pub fn generate_variable() -> String {
 pub fn generate_label() -> usize {
     use std::sync::atomic::Ordering;
     LABELSEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Returns a variable argument to return to, or null
+pub fn ret_or_null(ret: Option<&Vec<&str>>) -> Arg {
+    if let Some(ret) = ret {
+        match ret.len() {
+            0 => null(),
+            1 => str_to_var(ret[0]),
+            2.. => {
+                warn!("var_or_null received a return vector with more than one return variable");
+                str_to_var(ret[0])
+            },
+            _ => unreachable!()
+        }
+    } else {
+        null()
+    }
 }
 
 /// Returns a variable to return to, or none

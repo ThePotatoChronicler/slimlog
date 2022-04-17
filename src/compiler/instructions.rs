@@ -388,6 +388,31 @@ impl Type {
     }
 }
 
+/// Inverts Comparison into it's opposite
+impl std::ops::Neg for Comparison {
+    type Output = Comparison;
+    fn neg(self) -> Self::Output {
+        use Comparison::*;
+        match self {
+            Equals => NotEquals,
+            NotEquals => Equals,
+            LessThan => GreaterOrEqual,
+            LessOrEqual => GreaterThan,
+            GreaterThan => LessOrEqual,
+            GreaterOrEqual => LessThan,
+            StrictEquals => {
+                log::warn!(
+                    concat!("Negating StrictEquals into NotEquals may cause",
+                        "unintented consequences, this may have been invoked by an optimization"
+                        )
+                    );
+                NotEquals
+            },
+            Always => panic!("Always cannot be negated!")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

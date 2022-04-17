@@ -60,6 +60,11 @@ fn main() {
     };
     info!("Source input:\n{}", source);
     initialize_rng(&source);
+
+    if ARGS.transopts {
+        warn!("Translation optimizations are experimental and may break your program, proceed with caution!");
+    }
+
     let output: Result<String, String> = compiler::compile(&source);
     match output {
         Ok(out) => {

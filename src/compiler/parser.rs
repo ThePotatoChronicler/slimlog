@@ -19,8 +19,7 @@ use super::common::{
     Span,
     MResult
 };
-use crate::compiler::ast;
-
+use super::ast;
 
 /// Automatically converts input to a Span before passing it off to inner_tokenize
 pub fn tokenize(input: &str) -> Result<ast::Statement, MlogsError>{
@@ -71,14 +70,10 @@ pub fn string(input: Span) -> MResult<Span, Span> {
             Some(c) => {
                 if esc {
                     esc = false;
-                } else {
-                    // Logically, collapsing it makes it make less sense
-                    #[allow(clippy::collapsible_else_if)]
-                    if c == start {
-                        return Ok((input.slice(index + 1..), input.slice(..index + 1)))
-                    } else if c == '\\' {
-                        esc = true;
-                    }
+                } else if c == start {
+                    return Ok((input.slice(index + 1..), input.slice(..index + 1)))
+                } else if c == '\\' {
+                    esc = true;
                 }
                 index += 1;
             },
