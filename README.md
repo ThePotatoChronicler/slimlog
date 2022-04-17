@@ -12,6 +12,9 @@ mlogs is divided into three distinct parts
   - Translates instructions to processor instructions
   - May perform translation-time optimisations
 
+## Versioning
+Versions are whatever until 1.0.0 when all the major TODOs are completed
+
 ## TODOs
 At this point, the parser is *functional*, it will parse programs just fine,
 but it will not report any kind of syntax error whatsoever, instead handing out a cryptic error message
