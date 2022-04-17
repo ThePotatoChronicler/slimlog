@@ -1,0 +1,10 @@
+( do
+	(
+		iterlinks (
+			do
+				(print link)
+				(print "\n")
+		)
+	)
+	(printflush message1)
+)
