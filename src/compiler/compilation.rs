@@ -12,7 +12,7 @@ use super::{
         Statement,
         Argument,
     },
-    error::MlogsError,
+    error::ParserError,
     compiler_utils::*,
 };
 
@@ -22,7 +22,7 @@ use log::warn;
 type ErrT = String;
 
 pub fn compile(source: &str) -> Result<String, String> {
-    let tokens: Result<Statement, MlogsError> = parser::tokenize(source);
+    let tokens: Result<Statement, ParserError> = parser::tokenize(source);
     match tokens {
         Ok(tkns) => {
             match compile_statement(&tkns, None) {

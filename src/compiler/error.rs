@@ -1,12 +1,12 @@
 use super::common::Span;
 
 #[derive(Debug)]
-pub struct MlogsError<'a> {
+pub struct ParserError<'a> {
     pub message: String,
     pub span: Option<Span<'a>>
 }
 
-impl<'a> MlogsError<'a> {
+impl<'a> ParserError<'a> {
     pub fn new(message: &str, span: Span<'a>) -> Self {
         Self {
             message: message.into(),
@@ -15,7 +15,7 @@ impl<'a> MlogsError<'a> {
     }
 }
 
-impl<'a> From<nom::error::Error<Span<'a>>> for MlogsError<'a> {
+impl<'a> From<nom::error::Error<Span<'a>>> for ParserError<'a> {
     fn from(err: nom::error::Error<Span<'a>>) -> Self {
         let mut message = "Error: ".to_owned();
         message.push_str(err.code.description());
@@ -27,7 +27,7 @@ impl<'a> From<nom::error::Error<Span<'a>>> for MlogsError<'a> {
     }
 }
 
-impl<'a> From<Box<dyn std::error::Error>> for MlogsError<'a> {
+impl<'a> From<Box<dyn std::error::Error>> for ParserError<'a> {
     fn from(err: Box<dyn std::error::Error>) -> Self {
         Self {
             message: format!("{:#?}", err),
@@ -36,7 +36,7 @@ impl<'a> From<Box<dyn std::error::Error>> for MlogsError<'a> {
     }
 }
 
-impl<'a> From<nom::Err<nom::error::Error<Span<'a>>>> for MlogsError<'a> {
+impl<'a> From<nom::Err<nom::error::Error<Span<'a>>>> for ParserError<'a> {
     fn from(err: nom::Err<nom::error::Error<Span<'a>>>) -> Self {
         match err {
             nom::Err::Error(error) | nom::Err::Failure(error) => error.into(),
@@ -48,7 +48,7 @@ impl<'a> From<nom::Err<nom::error::Error<Span<'a>>>> for MlogsError<'a> {
     }
 }
 
-impl<'a> nom::error::ParseError<Span<'a>> for MlogsError<'a> {
+impl<'a> nom::error::ParseError<Span<'a>> for ParserError<'a> {
     fn from_error_kind(input: Span<'a>, kind: nom::error::ErrorKind) -> Self {
         nom::error::make_error::<_, nom::error::Error<Span<'a>>>(input, kind).into()
     }
@@ -58,7 +58,7 @@ impl<'a> nom::error::ParseError<Span<'a>> for MlogsError<'a> {
     }
 }
 
-impl<'a> std::ops::Add for MlogsError<'a> {
+impl<'a> std::ops::Add for ParserError<'a> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
@@ -69,7 +69,7 @@ impl<'a> std::ops::Add for MlogsError<'a> {
     }
 }
 
-impl<'a> From<(&'a str, Span<'a>)> for MlogsError<'a> {
+impl<'a> From<(&'a str, Span<'a>)> for ParserError<'a> {
     fn from(input: (&'a str, Span<'a>)) -> Self {
         Self {
             message: input.0.to_owned(),

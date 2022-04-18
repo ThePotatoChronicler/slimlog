@@ -14,36 +14,37 @@ use nom::{
     Slice
 };
 
-use super::error::MlogsError;
-use super::common::{
-    Span,
-    MResult
+use super::{
+    error::ParserError,
+    common::Span,
+    ast
 };
-use super::ast;
+
+pub type ParserResult<'a, I, O> = Result<(I, O), ParserError<'a>>;
 
 /// Automatically converts input to a Span before passing it off to inner_tokenize
-pub fn tokenize(input: &str) -> Result<ast::Statement, MlogsError>{
+pub fn tokenize(input: &str) -> Result<ast::Statement, ParserError>{
     inner_tokenize(Span::new(input))
 }
 
-pub fn inner_tokenize(input: Span) -> Result<ast::Statement, MlogsError> {
+pub fn inner_tokenize(input: Span) -> Result<ast::Statement, ParserError> {
     let (r, _) = multispace0(input)?;
     let (remains, b) = take_until_balanced('(', r, ')')?;
 
     let (remains, _) = multispace0(remains)?;
     if !remains.is_empty() {
-        return Err(MlogsError::new("Extra characters after main block", remains))
+        return Err(ParserError::new("Extra characters after main block", remains))
     }
 
     let (r, stmnt) = statement(b)?;
     if !r.is_empty() {
-        Err(MlogsError::new("Extra characters in main block", r))
+        Err(ParserError::new("Extra characters in main block", r))
     } else {
         Ok(stmnt)
     }
 }
 
-pub fn identifier(input: Span) -> MResult<Span, Span> {
+pub fn identifier(input: Span) -> ParserResult<Span, Span> {
     Ok(recognize(
         pair(
             is_a(
@@ -54,11 +55,11 @@ pub fn identifier(input: Span) -> MResult<Span, Span> {
     )(input)?)
 }
 
-pub fn decimal(input: Span) -> MResult<Span, Span> {
+pub fn decimal(input: Span) -> ParserResult<Span, Span> {
     Ok(is_a("0123456789")(input)?)
 }
 
-pub fn string(input: Span) -> MResult<Span, Span> {
+pub fn string(input: Span) -> ParserResult<Span, Span> {
 
     // Gets one of the two characters, or errors out
     let (_, start) = one_of("\"'")(input)?;
@@ -77,12 +78,12 @@ pub fn string(input: Span) -> MResult<Span, Span> {
                 }
                 index += 1;
             },
-            None => return Err(MlogsError::new("Unmatched quote", input))
+            None => return Err(ParserError::new("Unmatched quote", input))
         }
     }
 }
 
-pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> MResult<Span, Span> {
+pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> ParserResult<Span, Span> {
     let (i, _) = char(opening)(txt)?;
     let mut index = 0;
     let mut depth = 1;
@@ -106,7 +107,7 @@ pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> MResult<
     }
 }
 
-pub fn statement(input: Span) -> MResult<Span, ast::Statement> {
+pub fn statement(input: Span) -> ParserResult<Span, ast::Statement> {
     let (r, _) = multispace0(input)?;
     let (r, command) = identifier(r)?;
     let mut arguments: Vec<ast::Argument> = Vec::new();
@@ -132,12 +133,12 @@ pub fn statement(input: Span) -> MResult<Span, ast::Statement> {
                 let (remains, stmnt) = statement(b)?;
                 let (remains, _) = multispace0(remains)?;
                 if !remains.is_empty() {
-                    return Err(MlogsError::new("Extra characters in statement", remains))
+                    return Err(ParserError::new("Extra characters in statement", remains))
                 } else {
                     ast::Argument::Statement(stmnt)
                 }
             } else {
-                return Err(MlogsError::new("Not a valid argument", inr))
+                return Err(ParserError::new("Not a valid argument", inr))
             }
         };
         arguments.push(arg);
