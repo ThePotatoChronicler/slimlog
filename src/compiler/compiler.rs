@@ -90,6 +90,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                         Color([r, g, b]) => format!("control color {} {} {} {}", target, r, g, b)
                     }
                 },
+                End => "end".into(),
                 Label(_) => {
                     if inst == ins.len() - 1 {
                         "end".into()
@@ -110,7 +111,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                 Op(operation, [ret, arg0, arg1]) => format!("op {} {} {} {}", operation.to_string(), ret, arg0, arg1),
                 Sensor([store, block, sensable]) => format!("sensor {} {} {}", store, block, sensable),
                 Set([name, value]) => format!("set {} {}", name, value),
-                End => "end".into(),
+                UnitBind(unit) => format!("ubind {}", unit),
                 _Raw(s) => s.clone(),
                 instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction))
             }
@@ -157,11 +158,7 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
     let mut ins = Vec::new();
     let mut matched = true;
     match *statement.command {
-        name @ "print" => {
-            let (mut i, [a]) = generic_passthrough::<1>(name, &statement.arguments)?;
-            i.push(Ins::Print(a));
-            ins.extend(i);
-        },
+        "bind" => ins.push(bind_function(&statement.arguments)?),
         "control" => ins.extend(control_function(&statement.arguments)?),
         "do" => ins.extend(do_function(&statement.arguments)?),
         "getlink" => ins.extend(getlink_function(&statement.arguments, ret)?),
@@ -170,6 +167,11 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
         "while" => ins.extend(while_function(&statement.arguments)?),
         "set" => ins.extend(set_function(&statement.arguments)?),
         "sensor" => ins.push(sensor_function(&statement.arguments, ret)?),
+        "print" => {
+            let (mut i, [a]) = generic_passthrough::<1>("print", &statement.arguments)?;
+            i.push(Ins::Print(a));
+            ins.extend(i);
+        },
         "_raw" => ins.push(raw_function(&statement.arguments)?),
         _ => matched = false
     };
@@ -561,4 +563,17 @@ fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     };
 
     Ok(ins)
+}
+
+fn bind_function(args: &[Argument]) -> Result<Ins, String> {
+    if args.len() != 1 {
+        return Err("bind expects exactly one argument".into());
+    }
+
+    let ident = expect_identifier(&args[0], "bind function's argument must be an identifier")?;
+    if ident.as_bytes()[0] != b'@' {
+        warn!("bind function's argument should probably begin with a @");
+    }
+
+    Ok(Ins::UnitBind(make_variable(ident)))
 }
