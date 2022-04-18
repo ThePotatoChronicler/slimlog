@@ -129,8 +129,7 @@ pub enum Operation {
     Minus,
     Mult,
     Div,
-    /// Floored division
-    FDiv,
+    IDiv,
     Modulo,
     Power,
     Equals,
@@ -250,10 +249,38 @@ impl From<Operation> for &'static str {
             Minus => "sub",
             Mult => "mul",
             Div => "div",
-            Floor => "floor",
+            IDiv => "idiv",
+            Modulo => "mod",
+            Power => "pow",
+            Equals => "equal",
+            NotEquals => "notEqual",
+            And => "land",
             LessThan => "lessThan",
             LessOrEqual => "lessThanEq",
-            _ => todo!("Haven't written all these")
+            GreaterThan => "greaterThan",
+            GreaterOrEqual => "greaterThanEq",
+            StrictEquals => "strictEqual",
+            LeftShift => "shl",
+            RightShift => "shr",
+            Or => "or",
+            BinaryAnd => "and",
+            Xor => "xor",
+            Flip => "not",
+            Max => "max",
+            Min => "min",
+            Angle => "angle",
+            Len => "len",
+            Noise => "noise",
+            Abs => "abs",
+            Log => "log",
+            Log10 => "log10",
+            Sin => "sin",
+            Cos => "cos",
+            Tan => "tan",
+            Floor => "floor",
+            Ceil => "ceil",
+            Sqrt => "sqrt",
+            Rand => "rand"
         }
     }
 }
@@ -267,9 +294,38 @@ impl std::str::FromStr for Operation {
             "-" => Minus,
             "*" => Mult,
             "/" => Div,
-            "<=" => LessOrEqual,
+            "//" => IDiv,
+            "%" => Modulo,
+            "**" => Power,
+            "==" => Equals,
+            "!=" => NotEquals,
+            "&&" => And,
             "<" => LessThan,
+            "<=" => LessOrEqual,
+            ">" => GreaterThan,
+            ">=" => GreaterOrEqual,
+            "===" => StrictEquals,
+            "<<" => LeftShift,
+            ">>" => RightShift,
+            "|" => Or,
+            "&" => BinaryAnd,
+            "^" => Xor,
+            "~" => Flip,
+            "max" => Max,
+            "min" => Min,
+            "angle" => Angle,
+            "len" => Len,
+            "noise" => Noise,
+            "abs" => Abs,
+            "log" => Log,
+            "log10" => Log10,
+            "sin" => Sin,
+            "cos" => Cos,
+            "tan" => Tan,
             "floor" => Floor,
+            "ceil" => Ceil,
+            "sqrt" => Sqrt,
+            "rand" => Rand,
             _ => return Err(format!("Unknown operation {}", s))
         })
     }
@@ -279,16 +335,7 @@ impl Operation {
     /// Returns true if operation is unary
     pub fn unary(self) -> bool {
         use Operation::*;
-        match self {
-            Plus => false,
-            Minus => false,
-            Mult => false,
-            Div => false,
-            LessThan => false,
-            LessOrEqual => false,
-            Floor => true,
-            _ => todo!("Unimplemented action for {:?}", self)
-        }
+        matches!(self, Flip | Abs | Log | Log10 | Sin | Cos | Tan | Floor | Ceil | Sqrt | Rand)
     }
 }
 

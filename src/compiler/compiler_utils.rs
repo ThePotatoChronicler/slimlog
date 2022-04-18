@@ -38,6 +38,13 @@ pub fn make_literal_num<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
     Literal(Type::Num(span.borrow().parse().unwrap()))
 }
 
+/// Converts a statement into instructions and a generated variable argument
+pub fn make_statement(stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
+    let ret = generate_variable();
+    let ins = compile_statement(stmnt, Some(&vec![&ret]))?;
+    Ok((str_to_var(ret), ins))
+}
+
 /// Converts an argument into anything but a string
 pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), String> {
 
@@ -56,16 +63,16 @@ pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), Str
     Ok((newarg, ins))
 }
 
-pub fn make_num(n: f64) -> Arg {
-    Arg::Literal(Type::Num(n))
+pub fn make_num<T : Into<f64>>(n: T) -> Arg {
+    Arg::Literal(Type::Num(n.into()))
 }
 
 pub fn zero() -> Arg {
-    Arg::Literal(Type::Num(0.0))
+    make_num(0)
 }
 
 pub fn one() -> Arg {
-    Arg::Literal(Type::Num(1.0))
+    make_num(1)
 }
 
 pub fn null() -> Arg {
@@ -118,22 +125,6 @@ pub fn ret_or_null(ret: Option<&Vec<&str>>) -> Arg {
         }
     } else {
         null()
-    }
-}
-
-/// Returns a variable to return to, or none
-pub fn get_return_for_expression(ret: Option<&Vec<&str>>) -> Option<Arg> {
-    if let Some(v) = ret {
-        if v.is_empty() {
-            return None;
-        }
-        if v.len() > 1 {
-            warn!("Received more than one return variable for binary operation");
-        }
-
-        Some(Variable(v[0].into()))
-    } else {
-        None
     }
 }
 

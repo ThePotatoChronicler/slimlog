@@ -269,7 +269,7 @@ pub fn make_expression(opr: Operation, args: &[Argument], ret: Option<&Vec<&str>
         None
     };
 
-    ins.push(Ins::Op(opr,[ret_or_null(ret), arg0, if opr.unary() { Arg::Literal(Type::Num(0.0)) } else { arg1.unwrap() }]));
+    ins.push(Ins::Op(opr,[ret_or_null(ret), arg0, arg1.unwrap_or_else(zero) ]));
 
     Ok(ins)
 }
@@ -322,7 +322,7 @@ fn while_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     if let Some(cond_ins) = condition_ins {
         ins.extend(cond_ins);
     }
-    ins.push(Ins::Jump(forward_label, Comparison::Equals, [condition, Arg::Literal(Type::Num(0.0))]));
+    ins.push(Ins::Jump(forward_label, Comparison::Equals, [condition, zero()]));
 
     ins.extend(loop_ins);
 
@@ -348,9 +348,9 @@ pub fn generic_passthrough<const N: usize>(funcname: &str, args: &[Argument]) ->
             Number(num) => make_literal_num(num),
             String(string) => make_literal_str(string),
             Statement(stmnt) => {
-                let ret = generate_variable();
-                ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
-                str_to_var(ret)
+                let (newarg, newins) = make_statement(stmnt)?;
+                ins.extend(newins);
+                newarg
             }
         });
     }
@@ -557,7 +557,7 @@ fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
 
             ins.push(Ins::Control(target, ControlSI::Color([r, g, b])));
         },
-        invalid => return Err(format!("Invalid control subcommand {}", invalid))
+        invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
     };
 
     Ok(ins)
