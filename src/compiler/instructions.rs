@@ -56,7 +56,7 @@ pub enum Ins {
 
     /*
      *   Onwards are pseudo-instructions, which do not exist
-     *   in mlog, and are used as a crutch by mlogs
+     *   in mlog, and are used as a crutch by slimlog
      */
 
     Label(Label),

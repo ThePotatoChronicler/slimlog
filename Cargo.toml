@@ -1,5 +1,5 @@
 [package]
-name = "mlogs"
+name = "slimlog"
 authors = ["Potato Chronicler <thepotatochronicler@gmail.com>"]
 description = "A lisp-like language that compiles to mlog"
 version = "0.1.0-alpha"

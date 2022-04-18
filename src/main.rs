@@ -13,7 +13,7 @@ use std::sync::Mutex;
 #[derive(Parser)]
 #[clap(author, version, about)]
 struct Args {
-    /// The mlogs file to compile
+    /// The slimlog file to compile
     file: String,
     #[clap(long, default_value_t = 6, parse(try_from_str=verify_varlen))]
     /// Length of unnamed variables

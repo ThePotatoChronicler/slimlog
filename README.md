@@ -1,8 +1,8 @@
-# mlogs
-mlogs compiles a lisp-like language to [mlog](https://mindustrygame.github.io/wiki/logic/0-introduction/)
+# slimlog
+slimlog compiles a lisp-like language to [mlog](https://mindustrygame.github.io/wiki/logic/0-introduction/)
 
 ## Architecture
-mlogs is divided into three distinct parts
+slimlog is divided into three distinct parts
 - **Parser**
   - Parses the source file
 - **Compiler**
