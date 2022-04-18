@@ -6,7 +6,7 @@ use super::{
         Ins,
         Type
     },
-    compiler::compile_statement
+    compilation::compile_statement
 };
 
 use log::warn;
