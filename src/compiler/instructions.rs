@@ -28,11 +28,12 @@ pub enum Ins {
     PrintFlush(Arg),
     /// getlink store, index
     GetLink([Arg; 2]),
-    /// control subcommand
-    Control(ControlSI),
+    /// control subcommand target
+    /*       v-- target*/
+    Control(Arg, ControlSI),
     /// radar prop prop prop building order result
     Radar([TargetProp; 3], [Arg; 3]),
-    /// sensor store block sense
+    /// sensor store block sensable
     Sensor([Arg; 3]),
     /// set variable value
     Set([Arg; 2]),
@@ -90,15 +91,15 @@ pub enum DrawSI {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlSI {
     /// enabled target enabled
-    Enabled([Arg; 2]),
+    Enabled(Arg),
     /// shoot turret, x, y, shoot
-    Shoot([Arg; 4]),
-    /// shootp turret, target, bool
-    Shootp([Arg; 3]),
-    /// configure building config to
-    Configure([Arg; 3]),
+    Shoot([Arg; 3]),
+    /// shootp turret, unit, bool
+    Shootp([Arg; 2]),
+    /// configure building configuration
+    Configure(Arg),
     /// color illuminator r g b
-    Color([Arg; 4])
+    Color([Arg; 3])
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -403,8 +404,7 @@ impl std::ops::Neg for Comparison {
             StrictEquals => {
                 log::warn!(
                     concat!("Negating StrictEquals into NotEquals may cause",
-                        "unintented consequences, this may have been invoked by an optimization"
-                        )
+                        "unintented consequences. This may have been invoked by an optimization")
                     );
                 NotEquals
             },

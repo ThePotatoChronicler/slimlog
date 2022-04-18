@@ -3,8 +3,10 @@ use super::{
     common::Span,
     instructions::{
         Arg::{self, *},
+        Ins,
         Type
-    }
+    },
+    compiler::compile_statement
 };
 
 use log::warn;
@@ -34,6 +36,24 @@ pub fn make_literal_str<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 /// Converts a span into a number, without checking if it is a valid number
 pub fn make_literal_num<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
     Literal(Type::Num(span.borrow().parse().unwrap()))
+}
+
+/// Converts an argument into anything but a string
+pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), String> {
+
+    let mut ins = Vec::new();
+    let newarg = match arg {
+        Argument::String(_) => return Err(err.into()),
+        Argument::Number(num) => make_literal_num(num),
+        Argument::Identifier(ident) => make_variable(ident),
+        Argument::Statement(stmnt) => {
+            let ret = generate_variable();
+            ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
+            str_to_var(ret)
+        }
+    };
+
+    Ok((newarg, ins))
 }
 
 pub fn make_num(n: f64) -> Arg {

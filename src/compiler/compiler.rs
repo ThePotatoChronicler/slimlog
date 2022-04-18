@@ -5,7 +5,8 @@ use super::{
         Arg,
         Type,
         Operation,
-        Comparison
+        Comparison,
+        ControlSI
     },
     ast::{
         Statement,
@@ -14,6 +15,11 @@ use super::{
     error::MlogsError,
     compiler_utils::*,
 };
+
+use log::warn;
+
+/// A common type returned all the way back
+type ErrT = String;
 
 pub fn compile(source: &str) -> Result<String, String> {
     let tokens: Result<Statement, MlogsError> = parser::tokenize(source);
@@ -74,6 +80,16 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
         use Ins::*;
         result.push(
             match &ins[inst] {
+                Control(target, subc) => {
+                    use ControlSI::*;
+                    match subc {
+                        Enabled(enabled) => format!("control enabled {} {}", target, enabled),
+                        Shoot([x, y, shoot]) => format!("control shoot {} {} {} {}", target, x, y, shoot),
+                        Shootp([unit, shoot]) => format!("control shootp {} {} {}", target, unit, shoot),
+                        Configure(configuration) => format!("control configure {} {}", target, configuration),
+                        Color([r, g, b]) => format!("control color {} {} {} {}", target, r, g, b)
+                    }
+                },
                 Label(_) => {
                     if inst == ins.len() - 1 {
                         "end".into()
@@ -92,6 +108,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                 Print(arg) => format!("print {}", arg),
                 PrintFlush(arg) => format!("printflush {}", arg),
                 Op(operation, [ret, arg0, arg1]) => format!("op {} {} {} {}", operation.to_string(), ret, arg0, arg1),
+                Sensor([store, block, sensable]) => format!("sensor {} {} {}", store, block, sensable),
                 Set([name, value]) => format!("set {} {}", name, value),
                 End => "end".into(),
                 _Raw(s) => s.clone(),
@@ -152,7 +169,7 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
         "printflush" => ins.push(printflush_function(&statement.arguments)?),
         "while" => ins.extend(while_function(&statement.arguments)?),
         "set" => ins.extend(set_function(&statement.arguments)?),
-        "sensor" => ins.extend(sensor_function(&statement.arguments, ret)?),
+        "sensor" => ins.push(sensor_function(&statement.arguments, ret)?),
         "_raw" => ins.push(raw_function(&statement.arguments)?),
         _ => matched = false
     };
@@ -217,7 +234,7 @@ fn raw_function(args: &[Argument]) -> Result<Ins, String> {
         let r = *span;
         Ok(Ins::_Raw((r[1..r.len() - 1]).into()))
     } else {
-        Err("_raw argument must be a string!".into())
+        Err("_raw argument must be a string".into())
     }
 }
 
@@ -252,9 +269,7 @@ pub fn make_expression(opr: Operation, args: &[Argument], ret: Option<&Vec<&str>
         None
     };
 
-    if let Some(returnarg) = get_return_for_expression(ret) {
-        ins.push(Ins::Op(opr,[returnarg, arg0, if opr.unary() { Arg::Literal(Type::Num(0.0)) } else { arg1.unwrap() }]))
-    }
+    ins.push(Ins::Op(opr,[ret_or_null(ret), arg0, if opr.unary() { Arg::Literal(Type::Num(0.0)) } else { arg1.unwrap() }]));
 
     Ok(ins)
 }
@@ -399,21 +414,8 @@ fn getlink_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<In
         return Err("getlink function accepts exactly one argument".into())
     }
 
-    let mut ins = Vec::new();
-
-    let arg = match &args[0] {
-        Argument::Identifier(ident) => make_variable(ident),
-        Argument::Number(num) => make_literal_num(num),
-        Argument::String(_) => return Err("The argument to getlink function cannot be a string".into()),
-        Argument::Statement(stmnt) => {
-            let ret = generate_variable();
-            ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
-            str_to_var(ret)
-        }
-    };
-
+    let (arg, mut ins) = make_not_string(&args[0], "The argument to getlink function cannot be a string")?;
     ins.push(Ins::GetLink([ret_or_null(ret), arg]));
-
     Ok(ins)
 }
 
@@ -459,10 +461,104 @@ fn printflush_function(args: &[Argument]) -> Result<Ins, String> {
     }
 }
 
-fn sensor_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
-    todo!("sensor")
+fn sensor_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Ins, String> {
+    if args.len() != 2 {
+        return Err("sensor function accepts exactly two arguments".into());
+    }
+
+    let block = make_variable(expect_identifier(&args[0], "first argument `block' to sensor must be an identifier")?);
+    let sensable = expect_identifier(&args[1], "second argument `sensable' to sensor must be an identifier")?;
+    if sensable.as_bytes()[0] != b'@' {
+        warn!("second argument `sensable' to sensor should probably begin with a @");
+    }
+
+    let sensable = make_variable(sensable);
+    Ok(Ins::Sensor([ret_or_null(ret), block, sensable]))
 }
 
 fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
-    todo!("control")
+    if !matches!(args.len(), 2..=5) {
+        return Err("control accepts between 2 and 5 arguments".into())
+    }
+
+    let mut ins = vec![];
+
+    let target = make_variable(
+        expect_identifier(&args[0], "first argument `target' to control function must be an identifier")?);
+    let subcommand = expect_identifier(&args[1], "second argument `subcommand' to control function must be an identifier")?;
+
+    match *subcommand {
+        "enabled" => {
+            const C: &str = "control subcommand `enabled'";
+
+            if args.len() != 3 {
+                return Err(format!("{} expects one argument", C));
+            }
+
+            let (enabled, instr) = make_not_string(&args[2], &format!("{} `enabled' argument cannot be a string", C))?;
+            ins.extend(instr);
+            ins.push(Ins::Control(target, ControlSI::Enabled(enabled)));
+        },
+        "shoot" => {
+            const C: &str = "control subcommand `shoot'";
+
+            if args.len() != 5 {
+                return Err(format!("{} expects three arguments", C));
+            }
+
+            let (x, instr) = make_not_string(&args[2], &format!("{} `x' argument cannot be a string", C))?;
+            ins.extend(instr);
+            let (y, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
+            ins.extend(instr);
+            let (shoot, instr) = make_not_string(&args[4], &format!("{} `shoot' argument cannot be a string", C))?;
+            ins.extend(instr);
+
+            ins.push(Ins::Control(target, ControlSI::Shoot([x, y, shoot])));
+        },
+        "shootp" => {
+            const C: &str = "control subcommand `shootp'";
+
+            if args.len() != 4 {
+                return Err(format!("{} expects two arguments", C));
+            }
+
+            let (unit, instr) = make_not_string(&args[2], &format!("{} `x' argument cannot be a string", C))?;
+            ins.extend(instr);
+            let (shoot, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
+            ins.extend(instr);
+
+            ins.push(Ins::Control(target, ControlSI::Shootp([unit, shoot])));
+        },
+        "configure" => {
+            const C: &str = "control subcommand `configure'";
+
+            if args.len() != 3 {
+                return Err(format!("{} expects one argument", C));
+            }
+
+            let (configuration, instr) = make_not_string(&args[2], &format!("{} `configuration' argument cannot be a string", C))?;
+            ins.extend(instr);
+
+            ins.push(Ins::Control(target, ControlSI::Configure(configuration)));
+        },
+        "color" => {
+            const C: &str = "control subcommand `shoot'";
+
+            if args.len() != 5 {
+                return Err(format!("{} expects three arguments", C));
+            }
+
+            let (r, instr) = make_not_string(&args[2], &format!("{} `r' argument cannot be a string", C))?;
+            ins.extend(instr);
+            let (g, instr) = make_not_string(&args[3], &format!("{} `g' argument cannot be a string", C))?;
+            ins.extend(instr);
+            let (b, instr) = make_not_string(&args[4], &format!("{} `b' argument cannot be a string", C))?;
+            ins.extend(instr);
+
+            ins.push(Ins::Control(target, ControlSI::Color([r, g, b])));
+        },
+        invalid => return Err(format!("Invalid control subcommand {}", invalid))
+    };
+
+    Ok(ins)
 }
