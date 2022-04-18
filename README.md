@@ -15,6 +15,10 @@ slimlog is divided into three distinct parts
 ## Versioning
 Versions are whatever until 1.0.0 when all the major TODOs are completed
 
+## Name
+Originally called mlogs, but slimlog was suggested by a very important Indian friend of mine,
+so I changed it while I still could
+
 ## TODOs
 At this point, the parser is *functional*, it will parse programs just fine,
 but it will not report any kind of syntax error whatsoever, instead handing out a cryptic error message
