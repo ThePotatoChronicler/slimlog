@@ -33,5 +33,8 @@ are not very difficult to add at all, just doing them one by one as needed
 * [ ] All processor instructions
 * [ ] Documentation
 * [ ] Optimisations
+* [ ] Virtual processor
+  - Performance analysis
+  - Potentially verify optimisation correctness
 
 There is a lot to do
