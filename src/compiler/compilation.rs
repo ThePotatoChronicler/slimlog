@@ -222,7 +222,7 @@ fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
     for arg in args {
         if let Argument::Statement(stmnt) = arg {
-            match compile_statement(stmnt, Ctx::empty()) {
+            match compile_statement(stmnt, ctx.no_ret()) {
                 Ok(new_ins) => ins.extend(new_ins),
                 Err(err) => return Err(err)
             }
