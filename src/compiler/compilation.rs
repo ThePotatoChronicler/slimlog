@@ -14,18 +14,21 @@ use super::{
     },
     error::ParserError,
     compiler_utils::*,
+    context::Ctx
 };
 
 use log::warn;
 
+// TODO Replace all Result<_, String> with Result<_, ErrT>
 /// A common type returned all the way back
 type ErrT = String;
+
 
 pub fn compile(source: &str) -> Result<String, String> {
     let tokens: Result<Statement, ParserError> = parser::tokenize(source);
     match tokens {
         Ok(tkns) => {
-            match compile_statement(&tkns, None) {
+            match compile_statement(&tkns, Ctx::empty()) {
                 Ok(ref ins) => translate(ins).map(|r| r.join("\n")),
                 Err(err) => Err(err)
             }
@@ -153,26 +156,27 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
     res
 }
 
-pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
+pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
     use std::str::FromStr;
     let mut ins = Vec::new();
     let mut matched = true;
+    let newctx = ctx.with_args(&statement.arguments);
     match *statement.command {
-        "bind" => ins.push(bind_function(&statement.arguments)?),
-        "control" => ins.extend(control_function(&statement.arguments)?),
-        "do" => ins.extend(do_function(&statement.arguments)?),
-        "getlink" => ins.extend(getlink_function(&statement.arguments, ret)?),
-        "iterlinks" => ins.extend(iterlinks_function(&statement.arguments)?),
-        "printflush" => ins.push(printflush_function(&statement.arguments)?),
-        "while" => ins.extend(while_function(&statement.arguments)?),
-        "set" => ins.extend(set_function(&statement.arguments)?),
-        "sensor" => ins.push(sensor_function(&statement.arguments, ret)?),
+        "bind" => ins.push(bind_function(newctx)?),
+        "control" => ins.extend(control_function(newctx)?),
+        "do" => ins.extend(do_function(newctx)?),
+        "getlink" => ins.extend(getlink_function(newctx)?),
+        "iterlinks" => ins.extend(iterlinks_function(newctx)?),
+        "printflush" => ins.push(printflush_function(newctx)?),
+        "while" => ins.extend(while_function(newctx)?),
+        "set" => ins.extend(set_function(newctx)?),
+        "sensor" => ins.push(sensor_function(newctx)?),
         "print" => {
-            let (mut i, [a]) = generic_passthrough::<1>("print", &statement.arguments)?;
+            let (mut i, [a]) = generic_passthrough::<1>("print", newctx)?;
             i.push(Ins::Print(a));
             ins.extend(i);
         },
-        "_raw" => ins.push(raw_function(&statement.arguments)?),
+        "_raw" => ins.push(raw_function(newctx)?),
         _ => matched = false
     };
 
@@ -180,7 +184,7 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
         Ok(ins)
     } else {
         if let Ok(op) = Operation::from_str(*statement.command) {
-            ins.extend(make_expression(op, &statement.arguments, ret)?);
+            ins.extend(make_expression(op, newctx)?);
             return Ok(ins);
         }
 
@@ -188,7 +192,8 @@ pub fn compile_statement(statement: &Statement, ret: Option<&Vec<&str>>) -> Resu
     }
 }
 
-fn set_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
+fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let args = ctx.args;
     use Ins::Set;
     use Argument::*;
 
@@ -204,19 +209,20 @@ fn set_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
         String(string) => make_literal_str(string),
         Statement(stmnt) => {
             let ret = generate_variable();
-            let mut ins = compile_statement(stmnt, Some(&vec![&ret]))?;
-            ins.push(Set([make_variable(ident), str_to_var(ret)]));
+            let mut ins = compile_statement(stmnt, Ctx::just_ret(&ret))?;
+            ins.push(Set([make_variable(ident), str_to_var(&ret)]));
 
             return Ok(ins);
         }
     }])])
 }
 
-fn do_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
+fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let args = ctx.args;
     let mut ins = Vec::new();
     for arg in args {
         if let Argument::Statement(stmnt) = arg {
-            match compile_statement(stmnt, None) {
+            match compile_statement(stmnt, Ctx::empty()) {
                 Ok(new_ins) => ins.extend(new_ins),
                 Err(err) => return Err(err)
             }
@@ -227,7 +233,8 @@ fn do_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     Ok(ins)
 }
 
-fn raw_function(args: &[Argument]) -> Result<Ins, String> {
+fn raw_function(ctx: Ctx) -> Result<Ins, String> {
+    let args = ctx.args;
     if args.len() != 1 {
         return Err("_raw expects exactly one argument".into());
     }
@@ -240,7 +247,8 @@ fn raw_function(args: &[Argument]) -> Result<Ins, String> {
     }
 }
 
-pub fn make_expression(opr: Operation, args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
+pub fn make_expression(opr: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, ret, .. } = ctx;
     if opr.unary() && args.len() != 1 {
         return Err(format!("Expression {:?} accepts exactly two arguments", opr));
     } else if !opr.unary() && args.len() != 2 {
@@ -283,14 +291,15 @@ fn make_expression_argument(arg: &Argument) -> Result<(Arg, Option<Vec<Ins>>), S
         Number(num) => make_literal_num(num),
         String(string) => make_literal_str(string),
         Statement(stmnt) => {
-            let ret0 = generate_variable();
-            let ins = compile_statement(stmnt, Some(&vec![&ret0]))?;
-            return Ok((str_to_var(ret0), Some(ins)));
+            let ret = generate_variable();
+            let ins = compile_statement(stmnt, Ctx::from_ret(&ret))?;
+            return Ok((str_to_var(&ret), Some(ins)));
         }
     }, None))
 }
 
-fn while_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
+fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let args = ctx.args;
     if args.len() != 2 {
         return Err("while function accepts exactly two arguments".into());
     }
@@ -304,13 +313,13 @@ fn while_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
         String(string) => make_literal_str(string),
         Statement(stmnt) => {
             let ret = generate_variable();
-            condition_ins = Some(compile_statement(stmnt, Some(&vec![&ret]))?);
+            condition_ins = Some(compile_statement(stmnt, ctx.with_ret(&ret))?);
             str_to_var(ret)
         }
     };
 
     let loop_ins = if let Statement(stmnt) = &args[1] {
-        compile_statement(stmnt, None)?
+        compile_statement(stmnt, Ctx::empty())?
     } else {
         return Err("Second argument to while must be a statement".into());
     };
@@ -335,7 +344,8 @@ fn while_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
 }
 
 /// Cleanly passes through N arguments
-pub fn generic_passthrough<const N: usize>(funcname: &str, args: &[Argument]) -> Result<(Vec<Ins>, [Arg; N]), String> {
+pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(Vec<Ins>, [Arg; N]), String> {
+    let args = ctx.args;
     use Argument::*;
     let mut ins = Vec::new();
     let mut argvec = Vec::with_capacity(N);
@@ -411,7 +421,8 @@ fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     None
 }
 
-fn getlink_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<Ins>, String> {
+fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, ret, .. } = ctx;
     if args.len() != 1 {
         return Err("getlink function accepts exactly one argument".into())
     }
@@ -421,7 +432,8 @@ fn getlink_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Vec<In
     Ok(ins)
 }
 
-fn iterlinks_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
+fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let args = ctx.args;
     if args.len() != 1 {
         return Err("iterlinks function accepts exactly one argument".into())
     }
@@ -430,7 +442,7 @@ fn iterlinks_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     let statement_ins =
         if let Argument::Statement(stmnt) = &args[0] {
             let ret = generate_variable();
-            compile_statement(stmnt, Some(&vec![&ret]))?
+            compile_statement(stmnt, ctx.with_ret(&ret))?
         } else {
             return Err("iterlinks argument must be a statement".into());
     };
@@ -451,7 +463,8 @@ fn iterlinks_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     Ok(ins)
 }
 
-fn printflush_function(args: &[Argument]) -> Result<Ins, String> {
+fn printflush_function(ctx: Ctx) -> Result<Ins, String> {
+    let args = ctx.args;
     if args.len() != 1 {
         return Err("printflush function accepts exactly one argument".into())
     }
@@ -463,7 +476,8 @@ fn printflush_function(args: &[Argument]) -> Result<Ins, String> {
     }
 }
 
-fn sensor_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Ins, String> {
+fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
+    let Ctx { args, ret, .. } = ctx;
     if args.len() != 2 {
         return Err("sensor function accepts exactly two arguments".into());
     }
@@ -478,7 +492,8 @@ fn sensor_function(args: &[Argument], ret: Option<&Vec<&str>>) -> Result<Ins, St
     Ok(Ins::Sensor([ret_or_null(ret), block, sensable]))
 }
 
-fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
+fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let args = ctx.args;
     if !matches!(args.len(), 2..=5) {
         return Err("control accepts between 2 and 5 arguments".into())
     }
@@ -565,7 +580,8 @@ fn control_function(args: &[Argument]) -> Result<Vec<Ins>, String> {
     Ok(ins)
 }
 
-fn bind_function(args: &[Argument]) -> Result<Ins, String> {
+fn bind_function(ctx: Ctx) -> Result<Ins, String> {
+    let args = ctx.args;
     if args.len() != 1 {
         return Err("bind expects exactly one argument".into());
     }

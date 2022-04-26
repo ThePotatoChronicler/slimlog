@@ -6,7 +6,8 @@ use super::{
         Ins,
         Type
     },
-    compilation::compile_statement
+    compilation::compile_statement,
+    context::Ctx
 };
 
 use log::warn;
@@ -41,7 +42,7 @@ pub fn make_literal_num<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 /// Converts a statement into instructions and a generated variable argument
 pub fn make_statement(stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
     let ret = generate_variable();
-    let ins = compile_statement(stmnt, Some(&vec![&ret]))?;
+    let ins = compile_statement(stmnt, Ctx::just_ret(&ret))?;
     Ok((str_to_var(ret), ins))
 }
 
@@ -55,7 +56,7 @@ pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), Str
         Argument::Identifier(ident) => make_variable(ident),
         Argument::Statement(stmnt) => {
             let ret = generate_variable();
-            ins.extend(compile_statement(stmnt, Some(&vec![&ret]))?);
+            ins.extend(compile_statement(stmnt, Ctx::just_ret(&ret))?);
             str_to_var(ret)
         }
     };
@@ -112,19 +113,10 @@ pub fn generate_label() -> usize {
 }
 
 /// Returns a variable argument to return to, or null
-pub fn ret_or_null(ret: Option<&Vec<&str>>) -> Arg {
-    if let Some(ret) = ret {
-        match ret.len() {
-            0 => null(),
-            1 => str_to_var(ret[0]),
-            2.. => {
-                warn!("var_or_null received a return vector with more than one return variable");
-                str_to_var(ret[0])
-            },
-            _ => unreachable!()
-        }
-    } else {
-        null()
+pub fn ret_or_null(ret: Option<&str>) -> Arg {
+    match ret {
+        Some(s) => str_to_var(s),
+        None => null()
     }
 }
 
