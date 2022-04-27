@@ -6,8 +6,6 @@ use super::{
     },
 };
 
-use std::convert::AsRef;
-
 /// Context for all compiler functions
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Ctx<'a, 'r> {

@@ -147,6 +147,11 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
                 it += 2;
                 continue;
             }
+
+            /* TODO Optimize getlink and set into one,
+             * this will require checking for temporary variables and variable count,
+             * so for now, it is just a todo.
+             */
         }
 
         res.push(cin.clone());
@@ -174,6 +179,12 @@ pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, St
         "print" => {
             let (mut i, [a]) = generic_passthrough::<1>("print", newctx)?;
             i.push(Ins::Print(a));
+            ins.extend(i);
+        },
+        "println" => {
+            let (mut i, [a]) = generic_passthrough::<1>("println", newctx)?;
+            i.push(Ins::Print(a));
+            i.push(Ins::Print(newline()));
             ins.extend(i);
         },
         "_raw" => ins.push(raw_function(newctx)?),
@@ -258,6 +269,7 @@ pub fn make_expression(opr: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     // A slight optimization
+    // NOTE This should probably be in `optimize`, but for now is here
     if ret.is_none() && !args[0].is_statement() && !args[1].is_statement() {
         return Ok(vec![]);
     }

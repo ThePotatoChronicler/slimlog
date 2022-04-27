@@ -3,7 +3,7 @@
 	(while (< it @links) (
 		do
 			( set link (getlink it) )
-			( print link )
+			( println link )
 			( set it (+ it 1) )
 	))
 	(printflush message1)

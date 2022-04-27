@@ -12,6 +12,7 @@ use super::{
 
 use log::warn;
 
+// TODO Put this into Ctx, or make it somehow specific for every compilation
 lazy_static::lazy_static! {
     static ref VARSEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     static ref LABELSEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -30,8 +31,13 @@ pub fn make_variable<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 }
 
 /// Converts a span into a Literal
-pub fn make_literal_str<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
-    Literal(Type::Str((**span.borrow()).into()))
+pub fn make_literal_str<T: ToString>(span: T) -> Arg {
+    Literal(Type::Str(span.to_string()))
+}
+
+/// Creates a newline literal string
+pub fn newline() -> Arg {
+    make_literal_str("\\n")
 }
 
 /// Converts a span into a number, without checking if it is a valid number
