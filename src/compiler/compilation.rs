@@ -83,10 +83,10 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                     use ControlSI::*;
                     match subc {
                         Enabled(enabled) => format!("control enabled {} {}", target, enabled),
-                        Shoot([x, y, shoot]) => format!("control shoot {} {} {} {}", target, x, y, shoot),
-                        Shootp([unit, shoot]) => format!("control shootp {} {} {}", target, unit, shoot),
+                        Shoot { x, y, shoot } => format!("control shoot {} {} {} {}", target, x, y, shoot),
+                        Shootp { unit, shoot } => format!("control shootp {} {} {}", target, unit, shoot),
                         Configure(configuration) => format!("control configure {} {}", target, configuration),
-                        Color([r, g, b]) => format!("control color {} {} {} {}", target, r, g, b)
+                        Color { r, g, b } => format!("control color {} {} {} {}", target, r, g, b)
                     }
                 },
                 End => "end".into(),
@@ -554,7 +554,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (shoot, instr) = make_not_string(&args[4], &format!("{} `shoot' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Shoot([x, y, shoot])));
+            ins.push(Ins::Control(target, ControlSI::Shoot{ x, y, shoot }));
         },
         "shootp" => {
             const C: &str = "control subcommand `shootp'";
@@ -568,7 +568,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (shoot, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Shootp([unit, shoot])));
+            ins.push(Ins::Control(target, ControlSI::Shootp{ unit, shoot }));
         },
         "configure" => {
             const C: &str = "control subcommand `configure'";
@@ -596,7 +596,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (b, instr) = make_not_string(&args[4], &format!("{} `b' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Color([r, g, b])));
+            ins.push(Ins::Control(target, ControlSI::Color{ r, g, b }));
         },
         invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
     };

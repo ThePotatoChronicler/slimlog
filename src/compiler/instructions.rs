@@ -107,13 +107,24 @@ pub enum ControlSI {
     /// enabled target enabled
     Enabled(Arg),
     /// shoot turret, x, y, shoot
-    Shoot([Arg; 3]),
-    /// shootp turret, unit, bool
-    Shootp([Arg; 2]),
+    Shoot {
+        x: Arg,
+        y: Arg,
+        shoot: Arg
+    },
+    /// shootp turret, unit, shoot
+    Shootp {
+        unit: Arg,
+        shoot: Arg
+    },
     /// configure building configuration
     Configure(Arg),
     /// color illuminator r g b
-    Color([Arg; 3])
+    Color {
+        r: Arg,
+        g: Arg,
+        b: Arg
+    }
 }
 
 /// Target Property
