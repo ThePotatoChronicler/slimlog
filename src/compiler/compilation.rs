@@ -1,6 +1,7 @@
 use super::{
     parser,
     instructions::{
+        self,
         Ins,
         Arg,
         Type,
@@ -18,11 +19,6 @@ use super::{
 };
 
 use log::warn;
-
-// TODO Replace all Result<_, String> with Result<_, ErrT>
-/// A common type returned all the way back
-type ErrT = String;
-
 
 pub fn compile(source: &str) -> Result<String, String> {
     let tokens: Result<Statement, ParserError> = parser::tokenize(source);
@@ -101,7 +97,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                         continue
                     }
                 },
-                GetLink([res, arg]) => format!("getlink {} {}", res, arg),
+                GetLink { store, index } => format!("getlink {} {}", store, index),
                 Jump(label, cmp, [arg0, arg1]) => {
                     if !labels.contains_key(label) {
                         return Err("Missing label, this should never happen! Contact author(s)".into())
@@ -112,6 +108,11 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                 Print(arg) => format!("print {}", arg),
                 PrintFlush(arg) => format!("printflush {}", arg),
                 Op(operation, [ret, arg0, arg1]) => format!("op {} {} {} {}", operation.to_string(), ret, arg0, arg1),
+                Radar{ from, order, result: ret, sort, conds } => {
+                    format!("radar {} {} {} {} {} {} {}",
+                        conds[0], conds[1], conds[2],
+                        sort, from, order, ret)
+                },
                 Sensor([store, block, sensable]) => format!("sensor {} {} {}", store, block, sensable),
                 Set([name, value]) => format!("set {} {}", name, value),
                 UnitBind(unit) => format!("ubind {}", unit),
@@ -141,6 +142,13 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
                 continue;
             }
 
+            // Combines radar and set if possible
+            if let Some(new_instruction) = combine_radar_and_set(&ins[it], &ins[it + 1]) {
+                res.push(new_instruction);
+                it += 2;
+                continue;
+            }
+
             // Combines op and set
             if let Some(new_instruction) = combine_op_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
@@ -161,6 +169,9 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
     res
 }
 
+/// The standard function to compile a `Statement`
+///
+/// Replaces the `ctx`'s arguments 
 pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
     use std::str::FromStr;
     let mut ins = Vec::new();
@@ -173,7 +184,7 @@ pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, St
         "getlink" => ins.extend(getlink_function(newctx)?),
         "iterlinks" => ins.extend(iterlinks_function(newctx)?),
         "printflush" => ins.push(printflush_function(newctx)?),
-        "while" => ins.extend(while_function(newctx)?),
+        "radar" => ins.extend(radar_function(newctx)?),
         "set" => ins.extend(set_function(newctx)?),
         "sensor" => ins.push(sensor_function(newctx)?),
         "print" => {
@@ -187,6 +198,7 @@ pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, St
             i.push(Ins::Print(newline()));
             ins.extend(i);
         },
+        "while" => ins.extend(while_function(newctx)?),
         "_raw" => ins.push(raw_function(newctx)?),
         _ => matched = false
     };
@@ -331,7 +343,7 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     };
 
     let loop_ins = if let Statement(stmnt) = &args[1] {
-        compile_statement(stmnt, Ctx::empty())?
+        compile_statement(stmnt, ctx.no_ret())?
     } else {
         return Err("Second argument to while must be a statement".into());
     };
@@ -440,7 +452,7 @@ fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     let (arg, mut ins) = make_not_string(&args[0], "The argument to getlink function cannot be a string")?;
-    ins.push(Ins::GetLink([ret_or_null(ret), arg]));
+    ins.push(Ins::GetLink{store: ret_or_null(ret), index: arg});
     Ok(ins)
 }
 
@@ -465,7 +477,7 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     ins.push(Ins::Set([str_to_var(&itervar), zero()]));
     ins.push(Ins::Label(repeat_label));
-    ins.push(Ins::GetLink([str_to_var("link"), str_to_var(&itervar)]));
+    ins.push(Ins::GetLink { store: str_to_var("link"), index: str_to_var(&itervar) });
     ins.push(Ins::Jump(exit_label, Comparison::StrictEquals, [str_to_var(&itervar), str_to_var("null")]));
     ins.extend(statement_ins);
     ins.push(Ins::Op(Operation::Plus, [str_to_var(&itervar), str_to_var(&itervar), one()]));
@@ -604,4 +616,83 @@ fn bind_function(ctx: Ctx) -> Result<Ins, String> {
     }
 
     Ok(Ins::UnitBind(make_variable(ident)))
+}
+
+/// radar <from> <sort> <order> <prop> <prop> <prop>
+fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::{ TargetProp, TargetSort };
+    let Ctx { args, ret, .. } = ctx;
+
+    if args.len() > 6 {
+        return Err("Radar accepts 6 or less arguments".into());
+    }
+
+    let mut ins = Vec::new();
+    let mut from: Arg = str_to_var("@this");
+    let mut order: Arg = make_num(1);
+    let mut sort: TargetSort = TargetSort::Distance;
+    let mut conds: [TargetProp; 3] = [TargetProp::Any, TargetProp::Any, TargetProp::Any];
+
+    if !args.is_empty() {
+        // First argument
+        from = make_variable(expect_identifier(&args[0], "First argument to radar must be a string")?);
+
+        if args.len() >= 2 {
+            let ident = expect_identifier(&args[1], "The `sort` argument to radar must be an identifier")?;
+            sort = ident.parse().map_err(|_| "Second argument to radar must be a valid sort")?;
+        }
+
+        if args.len() >= 3 {
+            let (neworder, newins) = make_not_string(&args[2], "Third argument to radar cannot be a string")?;
+            order = neworder;
+            ins.extend(newins);
+        }
+
+        if args.len() >= 4 {
+            let ident = expect_identifier(&args[3], "The first condition argument to radar must be an identifier")?;
+            conds[0] = ident.parse().map_err(|_| "Fourth argument to radar must be a valid condition")?;
+        }
+
+        if args.len() >= 5 {
+            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
+            conds[1] = ident.parse().map_err(|_| "Fifth argument to radar must be a valid condition")?;
+        }
+
+        if args.len() >= 6 {
+            let ident = expect_identifier(&args[5], "The second condition argument to radar must be an identifier")?;
+            conds[2] = ident.parse().map_err(|_| "Sixth argument to radar must be a valid condition")?;
+        }
+    }
+
+    ins.push(Ins::Radar {
+        from,
+        order,
+        result: ret_or_null(ret),
+        sort,
+        conds
+    });
+
+    Ok(ins)
+}
+
+fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
+    match (ins1, ins2) {
+        ( Ins::Radar { result, .. },
+          Ins::Set([variable, value])) => {
+            if let Arg::Variable(resvar) = result {
+                if let Arg::Variable(setvalue) = value {
+                    if resvar == setvalue {
+                        let mut new_ins: Ins = ins1.clone();
+                        match new_ins {
+                            Ins::Radar { ref mut result, .. } => std::mem::replace(result, variable.clone()),
+                            _ => unreachable!()
+                        };
+                        return Some(new_ins);
+                    }
+                }
+            }
+        },
+        _ => return None
+    };
+    None
 }

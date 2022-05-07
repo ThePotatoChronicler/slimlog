@@ -54,7 +54,6 @@ pub fn make_statement(stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
 
 /// Converts an argument into anything but a string
 pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), String> {
-
     let mut ins = Vec::new();
     let newarg = match arg {
         Argument::String(_) => return Err(err.into()),

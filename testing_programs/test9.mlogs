@@ -1,0 +1,8 @@
+( do
+	(radar)
+	(radar germany)
+	(radar austria health)
+	(radar indonesia armor enemy)
+	(radar slovakia shield boss ground)
+	(set enemy (radar america maxhealth player attacker flying))
+)

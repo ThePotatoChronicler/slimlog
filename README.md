@@ -36,5 +36,6 @@ are not very difficult to add at all, just doing them one by one as needed
 * [ ] Virtual processor
   - Performance analysis
   - Potentially verify optimisation correctness
+* [ ] Preprocessor
 
 There is a lot to do

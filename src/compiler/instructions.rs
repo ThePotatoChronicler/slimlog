@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     Literal(Type),
@@ -27,12 +29,19 @@ pub enum Ins {
     /// printflush message
     PrintFlush(Arg),
     /// getlink store, index
-    GetLink([Arg; 2]),
+    GetLink { store: Arg, index: Arg },
     /// control subcommand target
     /*       v-- target*/
     Control(Arg, ControlSI),
-    /// radar prop prop prop building order result
-    Radar([TargetProp; 3], [Arg; 3]),
+    /// radar from order result sort prop prop prop
+    Radar {
+        /// Bulding from which we're searching
+        from: Arg,
+        order: Arg,
+        result: Arg,
+        sort: TargetSort,
+        conds: [TargetProp; 3]
+    },
     /// sensor store block sensable
     Sensor([Arg; 3]),
     /// set variable value
@@ -48,7 +57,12 @@ pub enum Ins {
     /// ucontrol subcommand ...
     UnitControl(UnitControlSI),
     /// uradar prop prop prop outX outY outFound
-    UnitRadar([TargetProp; 3], [Arg; 3]),
+    UnitRadar {
+        order: Arg,
+        result: Arg,
+        sort: TargetSort,
+        conds: [TargetProp; 3]
+    },
     /// ulocate subcommand ...
     UnitLocate(UnitLocateSI),
     /// noop
@@ -102,6 +116,7 @@ pub enum ControlSI {
     Color([Arg; 3])
 }
 
+/// Target Property
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TargetProp {
     Any,
@@ -220,14 +235,18 @@ pub enum BuildingGroup {
 
 impl std::fmt::Display for Arg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", match self {
+        let fstring;
+        f.write_str(match self {
             Arg::Literal(t) => {
                 match t {
-                    Type::Num(f) => f.to_string(),
-                    Type::Str(s) => s.clone()
+                    Type::Num(f) => {
+                        fstring = f.to_string();
+                        &fstring
+                    },
+                    Type::Str(s) => s
                 }
             },
-            Arg::Variable(v) => v.clone()
+            Arg::Variable(v) => v
         }).expect("Failed to write to Formatter");
         Ok(())
     }
@@ -285,8 +304,8 @@ impl From<Operation> for &'static str {
     }
 }
 
-impl std::str::FromStr for Operation {
-    type Err = String;
+impl FromStr for Operation {
+    type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Operation::*;
         Ok(match s {
@@ -326,7 +345,7 @@ impl std::str::FromStr for Operation {
             "ceil" => Ceil,
             "sqrt" => Sqrt,
             "rand" => Rand,
-            _ => return Err(format!("Unknown operation {}", s))
+            _ => return Err(())
         })
     }
 }
@@ -356,7 +375,7 @@ impl TryFrom<Operation> for Comparison {
 }
 
 impl TryFrom<Comparison> for Operation {
-    type Error = ();
+    type Error = String;
     fn try_from(op: Comparison) -> Result<Self, Self::Error> {
         Ok(match op {
             Comparison::Equals => Operation::Equals,
@@ -366,7 +385,7 @@ impl TryFrom<Comparison> for Operation {
             Comparison::GreaterThan => Operation::GreaterThan,
             Comparison::GreaterOrEqual => Operation::GreaterOrEqual,
             Comparison::StrictEquals => Operation::StrictEquals,
-            _ => return Err(())
+            _ => return Err(format!("{:?} is not a Comparison", op))
         })
     }
 }
@@ -406,6 +425,7 @@ impl From<Comparison> for &'static str {
 }
 
 impl Arg {
+
     /// Compares Argument based on Arg and Type
     pub fn cmp(&self, other: &Self) -> bool {
         use std::mem::discriminant;
@@ -460,6 +480,83 @@ impl std::ops::Neg for Comparison {
     }
 }
 
+impl FromStr for TargetSort {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use TargetSort::*;
+        Ok(match s {
+            "armor" => Armor,
+            "distance" => Distance,
+            "health" => Health,
+            "maxhealth" => MaxHealth,
+            "shield" => Shield,
+            _ => return Err(())
+        })
+    }
+}
+
+impl From<TargetSort> for &'static str {
+    fn from(sort: TargetSort) -> Self {
+        use TargetSort::*;
+        match sort {
+            Distance => "distance",
+            Health => "health",
+            Shield => "shield",
+            Armor => "armor",
+            MaxHealth => "maxHealth"
+        }
+    }
+}
+
+impl std::fmt::Display for TargetSort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str((*self).into()).expect("Failed to write to Formatter");
+        Ok(())
+    }
+}
+
+impl FromStr for TargetProp {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use TargetProp::*;
+        Ok(match s {
+            "any" => Any,
+            "enemy" => Enemy,
+            "ally" => Ally,
+            "player" => Player,
+            "attacker" => Attacker,
+            "flying" => Flying,
+            "boss" => Boss,
+            "ground" => Ground,
+            _ => return Err(())
+        })
+    }
+}
+
+impl From<TargetProp> for &'static str {
+    fn from(prop: TargetProp) -> Self {
+        use TargetProp::*;
+        match prop {
+            Any => "any",
+            Enemy => "enemy",
+            Ally => "ally",
+            Player => "player",
+            Attacker => "attacker",
+            Flying => "flying",
+            Boss => "boss",
+            Ground => "ground"
+        }
+    }
+}
+
+impl std::fmt::Display for TargetProp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str((*self).into()).expect("Failed to write to Formatter");
+        Ok(())
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -472,3 +569,5 @@ mod tests {
         assert!(Variable("Pain".into()).cmp(&Variable("Suffering".into())));
     }
 }
+
+
