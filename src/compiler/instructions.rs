@@ -32,7 +32,10 @@ pub enum Ins {
     GetLink { store: Arg, index: Arg },
     /// control subcommand target
     /*       v-- target*/
-    Control(Arg, ControlSI),
+    Control {
+        target: Arg,
+        subcommand: ControlSI
+    },
     /// radar from order result sort prop prop prop
     Radar {
         /// Bulding from which we're searching
@@ -45,13 +48,26 @@ pub enum Ins {
     /// sensor store block sensable
     Sensor([Arg; 3]),
     /// set variable value
-    Set([Arg; 2]),
+    Set {
+        variable: Arg,
+        value: Arg
+    },
     /// op operation result left right
-    Op(Operation, [Arg; 3]),
+    Op {
+        op: Operation,
+        result: Arg,
+        left: Arg,
+        right: Arg
+    },
     /// end
     End,
     /// jump addr comp left right
-    Jump(Label, Comparison, [Arg; 2]),
+    Jump {
+        label: Label,
+        cmp: Comparison,
+        left: Arg,
+        right: Arg
+    },
     /// ubind type
     UnitBind(Arg),
     /// ucontrol subcommand ...

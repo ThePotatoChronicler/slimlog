@@ -39,24 +39,8 @@ pub fn compile(source: &str) -> Result<String, String> {
 pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
     use std::collections::HashMap;
 
-    let optimized_ints: Option<Vec<Ins>>;
-    if crate::ARGS.transopts {
-        let mut old_oins = optimize(ins);
-        loop {
-            let oins = optimize(&old_oins);
-            if oins == old_oins {
-                break
-            } else {
-                old_oins = oins
-            }
-        }
-        optimized_ints = Some(old_oins);
-    } else {
-        optimized_ints = None;
-    }
-
-    let optinsref: Option<&[Ins]> = optimized_ints.as_deref();
-    let ins = optinsref.unwrap_or(ins);
+    let optimized_ins = repeated_optimize(ins);
+    let ins = optimized_ins.as_deref().unwrap_or(ins);
 
     // Translated instructions
     let mut result: Vec<String> = Vec::new();
@@ -79,9 +63,9 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
         use Ins::*;
         result.push(
             match &ins[inst] {
-                Control(target, subc) => {
+                Control { target, subcommand } => {
                     use ControlSI::*;
-                    match subc {
+                    match subcommand {
                         Enabled(enabled) => format!("control enabled {} {}", target, enabled),
                         Shoot { x, y, shoot } => format!("control shoot {} {} {} {}", target, x, y, shoot),
                         Shootp { unit, shoot } => format!("control shootp {} {} {}", target, unit, shoot),
@@ -98,23 +82,23 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                     }
                 },
                 GetLink { store, index } => format!("getlink {} {}", store, index),
-                Jump(label, cmp, [arg0, arg1]) => {
+                Jump { label, cmp, left, right } => {
                     if !labels.contains_key(label) {
                         return Err("Missing label, this should never happen! Contact author(s)".into())
                     }
                     let cmpstr: &'static str = (*cmp).into();
-                    format!("jump {} {} {} {}", labels[label], cmpstr, arg0, arg1)
+                    format!("jump {} {} {} {}", labels[label], cmpstr, left, right)
                 },
                 Print(arg) => format!("print {}", arg),
                 PrintFlush(arg) => format!("printflush {}", arg),
-                Op(operation, [ret, arg0, arg1]) => format!("op {} {} {} {}", operation.to_string(), ret, arg0, arg1),
+                Op { op, result: ret, left, right } => format!("op {} {} {} {}", op.to_string(), ret, left, right),
                 Radar{ from, order, result: ret, sort, conds } => {
                     format!("radar {} {} {} {} {} {} {}",
                         conds[0], conds[1], conds[2],
                         sort, from, order, ret)
                 },
                 Sensor([store, block, sensable]) => format!("sensor {} {} {}", store, block, sensable),
-                Set([name, value]) => format!("set {} {}", name, value),
+                Set { variable, value } => format!("set {} {}", variable, value),
                 UnitBind(unit) => format!("ubind {}", unit),
                 _Raw(s) => s.clone(),
                 instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction))
@@ -167,6 +151,23 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
     }
 
     res
+}
+
+/// Repeats [`optimize`] until it changes nothing
+pub fn repeated_optimize(ins: &[Ins]) -> Option<Vec<Ins>> {
+    if crate::ARGS.transopts {
+        let mut old_oins = optimize(ins);
+        loop {
+            let oins = optimize(&old_oins);
+            if oins == old_oins {
+                break Some(oins);
+            } else {
+                old_oins = oins;
+            }
+        }
+    } else {
+        None
+    }
 }
 
 /// The standard function to compile a `Statement`
@@ -226,18 +227,20 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     let ident = expect_identifier(&args[0], "first argument to set must be an identifier")?;
 
-    Ok(vec![Set([make_variable(ident), match &args[1] {
+    let value = match &args[1] {
         Identifier(id) => make_variable(id),
         Number(num) => make_literal_num(num),
         String(string) => make_literal_str(string),
         Statement(stmnt) => {
             let ret = generate_variable();
             let mut ins = compile_statement(stmnt, Ctx::just_ret(&ret))?;
-            ins.push(Set([make_variable(ident), str_to_var(&ret)]));
+            ins.push(Set { variable: make_variable(ident), value: str_to_var(&ret) });
 
             return Ok(ins);
         }
-    }])])
+    };
+
+    Ok(vec![Set { variable: make_variable(ident), value }])
 }
 
 fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -270,12 +273,12 @@ fn raw_function(ctx: Ctx) -> Result<Ins, String> {
     }
 }
 
-pub fn make_expression(opr: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
+pub fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
     let Ctx { args, ret, .. } = ctx;
-    if opr.unary() && args.len() != 1 {
-        return Err(format!("Expression {:?} accepts exactly two arguments", opr));
-    } else if !opr.unary() && args.len() != 2 {
-        return Err(format!("Expression {:?} accepts exactly one argument", opr));
+    if op.unary() && args.len() != 1 {
+        return Err(format!("Expression {:?} accepts exactly two arguments", op));
+    } else if !op.unary() && args.len() != 2 {
+        return Err(format!("Expression {:?} accepts exactly one argument", op));
     } else if !(1..=2).contains(&args.len()) {
         return Err("Expressions can only have one or two arguments".into());
     }
@@ -293,7 +296,7 @@ pub fn make_expression(opr: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
         ins.extend(i);
     }
 
-    let arg1 = if !opr.unary() {
+    let arg1 = if !op.unary() {
         let (arg1, ins1) = make_expression_argument(&args[1])?;
         if let Some(i) = ins1 {
             ins.extend(i)
@@ -303,7 +306,7 @@ pub fn make_expression(opr: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
         None
     };
 
-    ins.push(Ins::Op(opr,[ret_or_null(ret), arg0, arg1.unwrap_or_else(zero) ]));
+    ins.push(Ins::Op { op, result: ret_or_null(ret), left: arg0, right: arg1.unwrap_or_else(zero) });
 
     Ok(ins)
 }
@@ -357,11 +360,11 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     if let Some(cond_ins) = condition_ins {
         ins.extend(cond_ins);
     }
-    ins.push(Ins::Jump(forward_label, Comparison::Equals, [condition, zero()]));
+    ins.push(Ins::Jump { label: forward_label, cmp: Comparison::Equals, left: condition, right: zero() });
 
     ins.extend(loop_ins);
 
-    ins.push(Ins::Jump(back_label, Comparison::Always, [zero(), zero()]));
+    ins.push(Ins::Jump { label: back_label, cmp: Comparison::Always, left: zero(), right: zero() });
     ins.push(Ins::Label(forward_label));
 
     Ok(ins)
@@ -396,8 +399,8 @@ pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(
 
 fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
-        ( Ins::Op(opr, [result, oarg0, oarg1]),
-          Ins::Jump(label, cmp, [jarg0, jarg1])) => {
+        ( Ins::Op { op: opr, result, left: oarg0, right: oarg1 },
+          Ins::Jump { label, cmp, left: jarg0, right: jarg1 } ) => {
             if *cmp != Comparison::Equals {
                 return None
             }
@@ -410,7 +413,7 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if result == jarg0 {
                 if let Arg::Literal(Type::Num(other)) = jarg1 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump(*label, -opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
+                        return Some(Ins::Jump { label: *label, cmp: -opr_as_cmp, left: oarg0.clone(), right: oarg1.clone() });
                     }
                 }
             }
@@ -418,7 +421,7 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if result == jarg1 {
                 if let Arg::Literal(Type::Num(other)) = jarg0 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump(*label, -opr_as_cmp, [oarg0.clone(), oarg1.clone()]))
+                        return Some(Ins::Jump { label: *label, cmp: -opr_as_cmp, left: oarg0.clone(), right: oarg1.clone() });
                     }
                 }
             }
@@ -430,14 +433,12 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
 
 fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
-        ( Ins::Op(opr, [result, oarg0, oarg1]),
-          Ins::Set([variable, value])) => {
-            if let Arg::Variable(resvar) = result {
-                if let Arg::Variable(setvalue) = value {
-                    if resvar == setvalue {
-                        return Some(Ins::Op(*opr, [variable.clone(), oarg0.clone(), oarg1.clone()]));
-                    }
-                }
+        ( Ins::Op { op, result: Arg::Variable(resvar), left, right },
+          Ins::Set { variable, value: Arg::Variable(setvalue) } ) => {
+            if resvar == setvalue {
+                return Some(Ins::Op {
+                    op: *op, result: variable.clone(), left: left.clone(), right: right.clone()
+                });
             }
         },
         _ => return None
@@ -475,13 +476,28 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let repeat_label = generate_label();
     let exit_label = generate_label();
 
-    ins.push(Ins::Set([str_to_var(&itervar), zero()]));
+    ins.push(Ins::Set { variable: str_to_var(&itervar), value: zero() });
     ins.push(Ins::Label(repeat_label));
     ins.push(Ins::GetLink { store: str_to_var("link"), index: str_to_var(&itervar) });
-    ins.push(Ins::Jump(exit_label, Comparison::StrictEquals, [str_to_var(&itervar), str_to_var("null")]));
+    ins.push(Ins::Jump {
+        label: exit_label,
+        cmp: Comparison::StrictEquals,
+        left: str_to_var(&itervar),
+        right: str_to_var("null")
+    });
     ins.extend(statement_ins);
-    ins.push(Ins::Op(Operation::Plus, [str_to_var(&itervar), str_to_var(&itervar), one()]));
-    ins.push(Ins::Jump(repeat_label, Comparison::LessThan, [str_to_var(&itervar), str_to_var("@links")]));
+    ins.push(Ins::Op {
+        op: Operation::Plus,
+        result: str_to_var(&itervar),
+        left: str_to_var(&itervar),
+        right: one()
+    });
+    ins.push(Ins::Jump {
+        label: repeat_label,
+        cmp: Comparison::LessThan,
+        left: str_to_var(&itervar),
+        right: str_to_var("@links")
+    });
     ins.push(Ins::Label(exit_label));
 
     Ok(ins)
@@ -528,7 +544,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         expect_identifier(&args[0], "first argument `target' to control function must be an identifier")?);
     let subcommand = expect_identifier(&args[1], "second argument `subcommand' to control function must be an identifier")?;
 
-    match *subcommand {
+    let subcommand = match *subcommand {
         "enabled" => {
             const C: &str = "control subcommand `enabled'";
 
@@ -538,7 +554,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
             let (enabled, instr) = make_not_string(&args[2], &format!("{} `enabled' argument cannot be a string", C))?;
             ins.extend(instr);
-            ins.push(Ins::Control(target, ControlSI::Enabled(enabled)));
+            ControlSI::Enabled(enabled)
         },
         "shoot" => {
             const C: &str = "control subcommand `shoot'";
@@ -554,7 +570,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (shoot, instr) = make_not_string(&args[4], &format!("{} `shoot' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Shoot{ x, y, shoot }));
+            ControlSI::Shoot { x, y, shoot }
         },
         "shootp" => {
             const C: &str = "control subcommand `shootp'";
@@ -568,7 +584,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (shoot, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Shootp{ unit, shoot }));
+            ControlSI::Shootp { unit, shoot }
         },
         "configure" => {
             const C: &str = "control subcommand `configure'";
@@ -580,7 +596,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (configuration, instr) = make_not_string(&args[2], &format!("{} `configuration' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Configure(configuration)));
+            ControlSI::Configure(configuration)
         },
         "color" => {
             const C: &str = "control subcommand `shoot'";
@@ -596,11 +612,12 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let (b, instr) = make_not_string(&args[4], &format!("{} `b' argument cannot be a string", C))?;
             ins.extend(instr);
 
-            ins.push(Ins::Control(target, ControlSI::Color{ r, g, b }));
+            ControlSI::Color{ r, g, b }
         },
         invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
     };
 
+    ins.push(Ins::Control{ target, subcommand});
     Ok(ins)
 }
 
@@ -677,19 +694,15 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
 fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
-        ( Ins::Radar { result, .. },
-          Ins::Set([variable, value])) => {
-            if let Arg::Variable(resvar) = result {
-                if let Arg::Variable(setvalue) = value {
-                    if resvar == setvalue {
-                        let mut new_ins: Ins = ins1.clone();
-                        match new_ins {
-                            Ins::Radar { ref mut result, .. } => std::mem::replace(result, variable.clone()),
-                            _ => unreachable!()
-                        };
-                        return Some(new_ins);
-                    }
-                }
+        ( Ins::Radar { result: Arg::Variable(resvar), .. },
+          Ins::Set { variable, value: Arg::Variable(setvalue) }) => {
+            if resvar == setvalue {
+                let mut new_ins: Ins = ins1.clone();
+                match new_ins {
+                    Ins::Radar { ref mut result, .. } => std::mem::replace(result, variable.clone()),
+                    _ => unreachable!()
+                };
+                return Some(new_ins);
             }
         },
         _ => return None
