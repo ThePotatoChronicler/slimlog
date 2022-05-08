@@ -1,0 +1,7 @@
+( do
+	(set a 10)
+	(if (< a 15) (
+		print "Pain"
+	))
+	(printflush message1)
+)

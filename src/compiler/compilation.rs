@@ -6,26 +6,25 @@ use super::{
         Arg,
         Type,
         Operation,
-        Comparison,
-        ControlSI
+        Comparison
     },
-    ast::{
-        Statement,
-        Argument,
-    },
+    ast::{ self, Argument },
     error::ParserError,
     compiler_utils::*,
     context::Ctx
 };
 
-use log::warn;
+use log::{ warn, debug };
 
 pub fn compile(source: &str) -> Result<String, String> {
-    let tokens: Result<Statement, ParserError> = parser::tokenize(source);
+    let tokens: Result<ast::Statement, ParserError> = parser::tokenize(source);
     match tokens {
         Ok(tkns) => {
             match compile_statement(&tkns, Ctx::empty()) {
-                Ok(ref ins) => translate(ins).map(|r| r.join("\n")),
+                Ok(ins) => {
+                    debug!("Instructions: {:#?}", ins);
+                    translate(&ins).map(|r| r.join("\n"))
+                },
                 Err(err) => Err(err)
             }
         },
@@ -64,7 +63,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
         result.push(
             match &ins[inst] {
                 Control { target, subcommand } => {
-                    use ControlSI::*;
+                    use instructions::ControlSI::*;
                     match subcommand {
                         Enabled(enabled) => format!("control enabled {} {}", target, enabled),
                         Shoot { x, y, shoot } => format!("control shoot {} {} {} {}", target, x, y, shoot),
@@ -170,10 +169,10 @@ pub fn repeated_optimize(ins: &[Ins]) -> Option<Vec<Ins>> {
     }
 }
 
-/// The standard function to compile a `Statement`
+/// The standard function to compile a [`ast::Statement`]
 ///
 /// Replaces the `ctx`'s arguments 
-pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
+pub fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
     use std::str::FromStr;
     let mut ins = Vec::new();
     let mut matched = true;
@@ -183,6 +182,7 @@ pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, St
         "control" => ins.extend(control_function(newctx)?),
         "do" => ins.extend(do_function(newctx)?),
         "getlink" => ins.extend(getlink_function(newctx)?),
+        "if" => ins.extend(if_function(newctx)?),
         "iterlinks" => ins.extend(iterlinks_function(newctx)?),
         "printflush" => ins.push(printflush_function(newctx)?),
         "radar" => ins.extend(radar_function(newctx)?),
@@ -218,7 +218,6 @@ pub fn compile_statement(statement: &Statement, ctx: Ctx) -> Result<Vec<Ins>, St
 
 fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let args = ctx.args;
-    use Ins::Set;
     use Argument::*;
 
     if args.len() != 2 {
@@ -227,20 +226,10 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     let ident = expect_identifier(&args[0], "first argument to set must be an identifier")?;
 
-    let value = match &args[1] {
-        Identifier(id) => make_variable(id),
-        Number(num) => make_literal_num(num),
-        String(string) => make_literal_str(string),
-        Statement(stmnt) => {
-            let ret = generate_variable();
-            let mut ins = compile_statement(stmnt, Ctx::just_ret(&ret))?;
-            ins.push(Set { variable: make_variable(ident), value: str_to_var(&ret) });
+    let (value, mut ins) = make_generic(ctx, &args[1])?;
+    ins.push(Ins::Set { variable: make_variable(ident), value });
 
-            return Ok(ins);
-        }
-    };
-
-    Ok(vec![Set { variable: make_variable(ident), value }])
+    Ok(ins)
 }
 
 fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -289,40 +278,19 @@ pub fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
         return Ok(vec![]);
     }
 
-    let mut ins = Vec::new();
+    let (left, mut ins) = make_generic(ctx, &args[0])?;
 
-    let (arg0, ins0) = make_expression_argument(&args[0])?;
-    if let Some(i) = ins0 {
-        ins.extend(i);
-    }
-
-    let arg1 = if !op.unary() {
-        let (arg1, ins1) = make_expression_argument(&args[1])?;
-        if let Some(i) = ins1 {
-            ins.extend(i)
-        }
-        Some(arg1)
+    let right = if !op.unary() {
+        let (arg1, ins1) = make_generic(ctx, &args[1])?;
+        ins.extend(ins1);
+        arg1
     } else {
-        None
+        zero()
     };
 
-    ins.push(Ins::Op { op, result: ret_or_null(ret), left: arg0, right: arg1.unwrap_or_else(zero) });
+    ins.push(Ins::Op { op, result: ret_or_null(ret), left, right });
 
     Ok(ins)
-}
-
-fn make_expression_argument(arg: &Argument) -> Result<(Arg, Option<Vec<Ins>>), String> {
-    use Argument::*;
-    Ok((match arg {
-        Identifier(ident) => make_variable(ident),
-        Number(num) => make_literal_num(num),
-        String(string) => make_literal_str(string),
-        Statement(stmnt) => {
-            let ret = generate_variable();
-            let ins = compile_statement(stmnt, Ctx::from_ret(&ret))?;
-            return Ok((str_to_var(&ret), Some(ins)));
-        }
-    }, None))
 }
 
 fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -331,21 +299,9 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         return Err("while function accepts exactly two arguments".into());
     }
 
-    let mut condition_ins: Option<Vec<Ins>> = None;
+    let (condition, condition_ins) = make_generic(ctx, &args[0])?;
 
-    use Argument::*;
-    let condition = match &args[0] {
-        Identifier(id) => make_variable(id),
-        Number(num) => make_literal_num(num),
-        String(string) => make_literal_str(string),
-        Statement(stmnt) => {
-            let ret = generate_variable();
-            condition_ins = Some(compile_statement(stmnt, ctx.with_ret(&ret))?);
-            str_to_var(ret)
-        }
-    };
-
-    let loop_ins = if let Statement(stmnt) = &args[1] {
+    let loop_ins = if let Argument::Statement(stmnt) = &args[1] {
         compile_statement(stmnt, ctx.no_ret())?
     } else {
         return Err("Second argument to while must be a statement".into());
@@ -357,10 +313,8 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let back_label = generate_label();
     let forward_label = generate_label();
     ins.push(Ins::Label(back_label));
-    if let Some(cond_ins) = condition_ins {
-        ins.extend(cond_ins);
-    }
-    ins.push(Ins::Jump { label: forward_label, cmp: Comparison::Equals, left: condition, right: zero() });
+    ins.extend(condition_ins);
+    ins.push(Ins::Jump { label: forward_label, cmp: Comparison::StrictEquals, left: condition, right: zero() });
 
     ins.extend(loop_ins);
 
@@ -373,7 +327,7 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 /// Cleanly passes through N arguments
 pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(Vec<Ins>, [Arg; N]), String> {
     let args = ctx.args;
-    use Argument::*;
+
     let mut ins = Vec::new();
     let mut argvec = Vec::with_capacity(N);
 
@@ -382,16 +336,9 @@ pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(
     }
 
     for arg in args {
-        argvec.push(match arg {
-            Identifier(ident) => make_variable(ident),
-            Number(num) => make_literal_num(num),
-            String(string) => make_literal_str(string),
-            Statement(stmnt) => {
-                let (newarg, newins) = make_statement(stmnt)?;
-                ins.extend(newins);
-                newarg
-            }
-        });
+        let (newarg, newins) = make_generic(ctx, arg)?;
+        argvec.push(newarg);
+        ins.extend(newins);
     }
 
     Ok((ins, argvec.try_into().unwrap()))
@@ -401,7 +348,7 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
         ( Ins::Op { op: opr, result, left: oarg0, right: oarg1 },
           Ins::Jump { label, cmp, left: jarg0, right: jarg1 } ) => {
-            if *cmp != Comparison::Equals {
+            if !matches!(cmp, Comparison::StrictEquals) {
                 return None
             }
 
@@ -413,7 +360,13 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if result == jarg0 {
                 if let Arg::Literal(Type::Num(other)) = jarg1 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump { label: *label, cmp: -opr_as_cmp, left: oarg0.clone(), right: oarg1.clone() });
+                        return Some(
+                            Ins::Jump {
+                                label: *label,
+                                cmp: -opr_as_cmp,
+                                left: oarg0.clone(),
+                                right: oarg1.clone()
+                            });
                     }
                 }
             }
@@ -421,7 +374,13 @@ fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if result == jarg1 {
                 if let Arg::Literal(Type::Num(other)) = jarg0 {
                     if *other == 0.0 {
-                        return Some(Ins::Jump { label: *label, cmp: -opr_as_cmp, left: oarg0.clone(), right: oarg1.clone() });
+                        return Some(
+                            Ins::Jump {
+                                label: *label,
+                                cmp: -opr_as_cmp,
+                                left: oarg0.clone(),
+                                right: oarg1.clone()
+                            });
                     }
                 }
             }
@@ -452,7 +411,7 @@ fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         return Err("getlink function accepts exactly one argument".into())
     }
 
-    let (arg, mut ins) = make_not_string(&args[0], "The argument to getlink function cannot be a string")?;
+    let (arg, mut ins) = make_not_string(ctx, &args[0], "The argument to getlink function cannot be a string")?;
     ins.push(Ins::GetLink{store: ret_or_null(ret), index: arg});
     Ok(ins)
 }
@@ -533,6 +492,7 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
 }
 
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::ControlSI;
     let args = ctx.args;
     if !matches!(args.len(), 2..=5) {
         return Err("control accepts between 2 and 5 arguments".into())
@@ -552,7 +512,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 return Err(format!("{} expects one argument", C));
             }
 
-            let (enabled, instr) = make_not_string(&args[2], &format!("{} `enabled' argument cannot be a string", C))?;
+            let (enabled, instr) = make_not_string(ctx, &args[2], &format!("{} `enabled' argument cannot be a string", C))?;
             ins.extend(instr);
             ControlSI::Enabled(enabled)
         },
@@ -563,11 +523,11 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 return Err(format!("{} expects three arguments", C));
             }
 
-            let (x, instr) = make_not_string(&args[2], &format!("{} `x' argument cannot be a string", C))?;
+            let (x, instr) = make_not_string(ctx, &args[2], &format!("{} `x' argument cannot be a string", C))?;
             ins.extend(instr);
-            let (y, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
+            let (y, instr) = make_not_string(ctx, &args[3], &format!("{} `y' argument cannot be a string", C))?;
             ins.extend(instr);
-            let (shoot, instr) = make_not_string(&args[4], &format!("{} `shoot' argument cannot be a string", C))?;
+            let (shoot, instr) = make_not_string(ctx, &args[4], &format!("{} `shoot' argument cannot be a string", C))?;
             ins.extend(instr);
 
             ControlSI::Shoot { x, y, shoot }
@@ -579,9 +539,9 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 return Err(format!("{} expects two arguments", C));
             }
 
-            let (unit, instr) = make_not_string(&args[2], &format!("{} `x' argument cannot be a string", C))?;
+            let (unit, instr) = make_not_string(ctx, &args[2], &format!("{} `x' argument cannot be a string", C))?;
             ins.extend(instr);
-            let (shoot, instr) = make_not_string(&args[3], &format!("{} `y' argument cannot be a string", C))?;
+            let (shoot, instr) = make_not_string(ctx, &args[3], &format!("{} `y' argument cannot be a string", C))?;
             ins.extend(instr);
 
             ControlSI::Shootp { unit, shoot }
@@ -593,7 +553,12 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 return Err(format!("{} expects one argument", C));
             }
 
-            let (configuration, instr) = make_not_string(&args[2], &format!("{} `configuration' argument cannot be a string", C))?;
+            let (configuration, instr) =
+                make_not_string(
+                    ctx,
+                    &args[2],
+                    &format!("{} `configuration' argument cannot be a string", C)
+                )?;
             ins.extend(instr);
 
             ControlSI::Configure(configuration)
@@ -605,11 +570,11 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 return Err(format!("{} expects three arguments", C));
             }
 
-            let (r, instr) = make_not_string(&args[2], &format!("{} `r' argument cannot be a string", C))?;
+            let (r, instr) = make_not_string(ctx, &args[2], &format!("{} `r' argument cannot be a string", C))?;
             ins.extend(instr);
-            let (g, instr) = make_not_string(&args[3], &format!("{} `g' argument cannot be a string", C))?;
+            let (g, instr) = make_not_string(ctx, &args[3], &format!("{} `g' argument cannot be a string", C))?;
             ins.extend(instr);
-            let (b, instr) = make_not_string(&args[4], &format!("{} `b' argument cannot be a string", C))?;
+            let (b, instr) = make_not_string(ctx, &args[4], &format!("{} `b' argument cannot be a string", C))?;
             ins.extend(instr);
 
             ControlSI::Color{ r, g, b }
@@ -660,7 +625,7 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         }
 
         if args.len() >= 3 {
-            let (neworder, newins) = make_not_string(&args[2], "Third argument to radar cannot be a string")?;
+            let (neworder, newins) = make_not_string(ctx, &args[2], "Third argument to radar cannot be a string")?;
             order = neworder;
             ins.extend(newins);
         }
@@ -699,7 +664,7 @@ fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
             if resvar == setvalue {
                 let mut new_ins: Ins = ins1.clone();
                 match new_ins {
-                    Ins::Radar { ref mut result, .. } => std::mem::replace(result, variable.clone()),
+                    Ins::Radar { ref mut result, .. } => *result = variable.clone(),
                     _ => unreachable!()
                 };
                 return Some(new_ins);
@@ -708,4 +673,91 @@ fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
         _ => return None
     };
     None
+}
+
+fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, ret, .. } = ctx;
+
+    let mut argi = args.iter().peekable();
+
+    let mut next_label = generate_label();
+    let end_label = generate_label();
+
+    // if part
+    let (condition, mut ins) = make_generic(ctx, argi.next().ok_or("if function missing a condition")?)?;
+    let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("if function missing a body")?)?;
+
+    ins.push(Ins::Jump {
+        label: next_label,
+        cmp: Comparison::StrictEquals,
+        left: condition,
+        right: zero()
+    });
+
+    ins.extend(bodyins);
+    ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+
+    /* NOTE
+     * While this should probably be an optimization,
+     * it would be very difficult to detect at it's current
+     * capabilities, so it is here.
+     */
+    if argi.len() != 0 {
+        ins.push(jump_to(end_label));
+    }
+
+    let mut else_part = false;
+
+    loop {
+        match argi.peek() {
+            Some(Argument::Identifier(ident)) => {
+                argi.next(); // Skip what we just looked at
+                match **ident {
+                    "elif" => {
+                        let (condition, condition_ins) = make_generic(ctx, argi.next().ok_or("elif missing a condition")?)?;
+                        let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("elif missing a body")?)?;
+
+                        ins.push(Ins::Label (next_label));
+                        ins.extend(condition_ins);
+
+                        next_label = generate_label();
+
+                        ins.push(Ins::Jump {
+                            label: next_label,
+                            cmp: Comparison::StrictEquals,
+                            left: condition,
+                            right: zero()
+                        });
+
+                        ins.extend(bodyins);
+                        ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+                        ins.push(jump_to(end_label));
+                    }
+                    "else" => {
+                        else_part = true;
+                        break;
+                    },
+                    any => return Err(format!("unexpected identifier `{}` as argument to `if' function", any)),
+                };
+            },
+            Some(_) => {
+                let index = args.len() - argi.count();
+                return Err(format!("argument {} of function `if' should be an identifier `elif` or `else`", index));
+            },
+            _ => break
+        };
+    }
+
+    if else_part {
+        let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("else missing a body")?)?;
+        ins.push(Ins::Label (next_label));
+        ins.extend(bodyins);
+        ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+    } else {
+        ins.push(Ins::Label(next_label));
+    }
+
+    ins.push(Ins::Label(end_label));
+
+    Ok(ins)
 }

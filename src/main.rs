@@ -36,16 +36,8 @@ fn get_source() -> Result<String, std::io::Error> {
 }
 
 fn logger_init() {
-    use simplelog::*;
-    TermLogger::init(
-        LevelFilter::max(),
-        ConfigBuilder::default()
-            .set_target_level(LevelFilter::Off)
-            .set_level_padding(LevelPadding::Right)
-            .build(),
-        TerminalMode::Stderr,
-        ColorChoice::Auto
-    ).expect("Logger failed to initialize");
+    env_logger::builder()
+        .init();
 }
 
 fn main() {

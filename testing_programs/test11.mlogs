@@ -1,0 +1,9 @@
+( do
+	(set a 10)
+	(set thing (
+		if (== a 10) 1
+		elif (== a 11) 2
+		elif (== a 12) 3
+		else 4
+    ))
+)

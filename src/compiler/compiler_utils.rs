@@ -2,6 +2,7 @@ use super::{
     ast::*,
     common::Span,
     instructions::{
+        self,
         Arg::{self, *},
         Ins,
         Type
@@ -9,8 +10,6 @@ use super::{
     compilation::compile_statement,
     context::Ctx
 };
-
-use log::warn;
 
 // TODO Put this into Ctx, or make it somehow specific for every compilation
 lazy_static::lazy_static! {
@@ -46,23 +45,40 @@ pub fn make_literal_num<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 }
 
 /// Converts a statement into instructions and a generated variable argument
-pub fn make_statement(stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
+pub fn make_statement(ctx: Ctx, stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
     let ret = generate_variable();
-    let ins = compile_statement(stmnt, Ctx::just_ret(&ret))?;
+    let ins = compile_statement(stmnt, ctx.with_ret(&ret))?;
     Ok((str_to_var(ret), ins))
 }
 
 /// Converts an argument into anything but a string
-pub fn make_not_string(arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), String> {
+pub fn make_not_string(ctx: Ctx, arg: &Argument, err: &str) -> Result<(Arg, Vec<Ins>), String> {
     let mut ins = Vec::new();
     let newarg = match arg {
         Argument::String(_) => return Err(err.into()),
         Argument::Number(num) => make_literal_num(num),
         Argument::Identifier(ident) => make_variable(ident),
         Argument::Statement(stmnt) => {
-            let ret = generate_variable();
-            ins.extend(compile_statement(stmnt, Ctx::just_ret(&ret))?);
-            str_to_var(ret)
+            let (arg, newins) = make_statement(ctx, stmnt)?;
+            ins.extend(newins);
+            arg
+        }
+    };
+
+    Ok((newarg, ins))
+}
+
+/// Converts an argument into an Arg
+pub fn make_generic(ctx: Ctx, arg: &Argument) -> Result<(Arg, Vec<Ins>), String> {
+    let mut ins = Vec::new();
+    let newarg = match arg {
+        Argument::String(span) => make_literal_str(span),
+        Argument::Number(num) => make_literal_num(num),
+        Argument::Identifier(ident) => make_variable(ident),
+        Argument::Statement(stmnt) => {
+            let (arg, newins) = make_statement(ctx, stmnt)?;
+            ins.extend(newins);
+            arg
         }
     };
 
@@ -109,6 +125,16 @@ pub fn generate_variable() -> String {
         }
 
         var
+    }
+}
+
+/// Always jumps to the label
+pub fn jump_to(label: usize) -> Ins {
+    Ins::Jump {
+        label,
+        cmp: instructions::Comparison::Always,
+        left: zero(),
+        right: zero(),
     }
 }
 
