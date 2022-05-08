@@ -4,18 +4,13 @@ use super::{
     instructions::{
         self,
         Arg::{self, *},
+        Vartype,
         Ins,
         Type
     },
     compilation::compile_statement,
     context::Ctx
 };
-
-// TODO Put this into Ctx, or make it somehow specific for every compilation
-lazy_static::lazy_static! {
-    static ref VARSEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    static ref LABELSEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-}
 
 pub fn expect_identifier<'a, 'b>(arg: &'a Argument, err: &'b str) -> Result<Span<'a>, String> {
     match arg {
@@ -26,7 +21,7 @@ pub fn expect_identifier<'a, 'b>(arg: &'a Argument, err: &'b str) -> Result<Span
 
 /// Converts a span into a Variable
 pub fn make_variable<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
-    Variable((**span.borrow()).into())
+    Variable(Vartype::Named((**span.borrow()).into()))
 }
 
 /// Converts a span into a Literal
@@ -46,9 +41,9 @@ pub fn make_literal_num<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 
 /// Converts a statement into instructions and a generated variable argument
 pub fn make_statement(ctx: Ctx, stmnt: &Statement) -> Result<(Arg, Vec<Ins>), String> {
-    let ret = generate_variable();
+    let ret = generate_unnamed(ctx);
     let ins = compile_statement(stmnt, ctx.with_ret(&ret))?;
-    Ok((str_to_var(ret), ins))
+    Ok((Variable(ret), ins))
 }
 
 /// Converts an argument into anything but a string
@@ -102,30 +97,18 @@ pub fn null() -> Arg {
 }
 
 pub fn str_to_var<T: std::convert::AsRef<str>>(string: T) -> Arg {
-    Variable(string.as_ref().to_owned())
+    Variable(Vartype::Named(string.as_ref().to_owned()))
 }
 
-/// Generates a random variable name for use in
+/// Generates an unnamed variable for use in
 /// the resulting mlog code
-pub fn generate_variable() -> String {
-    if crate::ARGS.seqvars {
-        use std::sync::atomic::Ordering;
-        let var = format!("__{}", VARSEQ.fetch_add(1, Ordering::Relaxed));
-        var
-    } else {
-        use rand::Rng;
-        let mut var = String::with_capacity(crate::ARGS.varlen + 2);
-        var.push_str("__");
+pub fn generate_variable(ctx: Ctx) -> Arg {
+    Variable(generate_unnamed(ctx))
+}
 
-        const CHARSET: &[u8] = b"0123456789abcdef";
-        let mut rng_lock = crate::RNG.lock().unwrap();
-        let rng = rng_lock.as_mut().unwrap();
-        for _ in 0..crate::ARGS.varlen {
-            var.push(CHARSET[rng.gen_range(0..CHARSET.len())] as char)
-        }
-
-        var
-    }
+/// Generates the next unnamed vartype
+pub fn generate_unnamed(ctx: Ctx) -> Vartype {
+    Vartype::Unnamed(ctx.get_next())
 }
 
 /// Always jumps to the label
@@ -138,27 +121,14 @@ pub fn jump_to(label: usize) -> Ins {
     }
 }
 
-pub fn generate_label() -> usize {
-    use std::sync::atomic::Ordering;
-    LABELSEQ.fetch_add(1, Ordering::Relaxed)
+pub fn generate_label(ctx: Ctx) -> usize {
+    ctx.get_next()
 }
 
 /// Returns a variable argument to return to, or null
-pub fn ret_or_null(ret: Option<&str>) -> Arg {
+pub fn ret_or_null(ret: Option<&Vartype>) -> Arg {
     match ret {
-        Some(s) => str_to_var(s),
+        Some(s) => Variable(s.clone()),
         None => null()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn variables() {
-        use crate::compiler::compiler_utils::generate_variable;
-        let var = generate_variable();
-        assert_eq!(var.len(), 34);
-        assert_eq!(&var[0..=1], "__");
-        hex::decode(&var[2..]).expect("Not hex");
     }
 }

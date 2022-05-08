@@ -4,26 +4,37 @@ use super::{
         self,
         Ins,
         Arg,
-        Type,
         Operation,
-        Comparison
+        Comparison,
     },
     ast::{ self, Argument },
     error::ParserError,
     compiler_utils::*,
-    context::Ctx
+    context::{
+        Context,
+        Ctx,
+    },
+    settings::Settings,
+    utils,
+    optimizations,
 };
 
-use log::{ warn, debug };
+use log::{ warn, debug, info };
 
-pub fn compile(source: &str) -> Result<String, String> {
+pub fn compile(source: &str, settings: &Settings) -> Result<String, String> {
     let tokens: Result<ast::Statement, ParserError> = parser::tokenize(source);
     match tokens {
         Ok(tkns) => {
-            match compile_statement(&tkns, Ctx::empty()) {
+            let owned_ctx = Context::new();
+            match compile_statement(&tkns, owned_ctx.create_empty_ctx()) {
                 Ok(ins) => {
                     debug!("Instructions: {:#?}", ins);
-                    translate(&ins).map(|r| r.join("\n"))
+
+                    info!("Creating PRNG Seed");
+                    let seed = utils::create_seed(source);
+                    info!("PRNG Seed: {}", hex::encode(seed));
+
+                    translate(&ins, settings, &seed).map(|r| r.join("\n"))
                 },
                 Err(err) => Err(err)
             }
@@ -35,11 +46,19 @@ pub fn compile(source: &str) -> Result<String, String> {
 }
 
 /// Translates instructions to their mlog counterparts
-pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
+///
+/// seed is used to create random hexadecimal names
+pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Vec<String>, String> {
     use std::collections::HashMap;
+    use rand::SeedableRng;
 
-    let optimized_ins = repeated_optimize(ins);
-    let ins = optimized_ins.as_deref().unwrap_or(ins);
+    let optimized_instructions = if settings.get_transopts() {
+        Some(repeated_optimize(ins))
+    } else {
+        None
+    };
+
+    let ins = optimized_instructions.as_deref().unwrap_or(ins);
 
     // Translated instructions
     let mut result: Vec<String> = Vec::new();
@@ -58,18 +77,41 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
         lbls
     };
 
+    // Rng used to create random hex vars
+    let mut rng = rand::rngs::StdRng::from_seed(*seed);
+    // Map used to keep track of number to name relationships
+    let mut map = std::collections::HashMap::new();
+
+    // A macro to aid us in this messy world
+    macro_rules! disp {
+        ($single:ident) => { $single.display(&mut rng, &mut map, settings) };
+        ([$($list:ident),*]) => {{
+            [$($list),*].map(|s| s.display(&mut rng, &mut map, settings))
+        }};
+    }
+
     for inst in 0..ins.len() {
         use Ins::*;
         result.push(
             match &ins[inst] {
                 Control { target, subcommand } => {
+                    let [target] = disp!([target]);
                     use instructions::ControlSI::*;
                     match subcommand {
-                        Enabled(enabled) => format!("control enabled {} {}", target, enabled),
-                        Shoot { x, y, shoot } => format!("control shoot {} {} {} {}", target, x, y, shoot),
-                        Shootp { unit, shoot } => format!("control shootp {} {} {}", target, unit, shoot),
-                        Configure(configuration) => format!("control configure {} {}", target, configuration),
-                        Color { r, g, b } => format!("control color {} {} {} {}", target, r, g, b)
+                        Enabled(enabled) => format!("control enabled {} {}", target, disp!(enabled)),
+                        Shoot { x, y, shoot } => {
+                            let [x, y, shoot] = disp!([x, y, shoot]);
+                            format!("control shoot {} {} {} {}", target, x, y, shoot)
+                        },
+                        Shootp { unit, shoot } => {
+                            let [unit, shoot] = disp!([unit, shoot]);
+                            format!("control shootp {} {} {}", target, unit, shoot)
+                        },
+                        Configure(configuration) => format!("control configure {} {}", target, disp!([configuration])[0]),
+                        Color { r, g, b } => {
+                            let [r, g, b] = disp!([r, g, b]);
+                            format!("control color {} {} {} {}", target, r, g, b)
+                        },
                     }
                 },
                 End => "end".into(),
@@ -80,27 +122,41 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
                         continue
                     }
                 },
-                GetLink { store, index } => format!("getlink {} {}", store, index),
+                GetLink { store, index } => {
+                    let [store, index] = disp!([store, index]);
+                    format!("getlink {} {}", store, index)
+                },
                 Jump { label, cmp, left, right } => {
                     if !labels.contains_key(label) {
                         return Err("Missing label, this should never happen! Contact author(s)".into())
                     }
                     let cmpstr: &'static str = (*cmp).into();
+                    let [left, right] = disp!([left, right]);
                     format!("jump {} {} {} {}", labels[label], cmpstr, left, right)
                 },
-                Print(arg) => format!("print {}", arg),
-                PrintFlush(arg) => format!("printflush {}", arg),
-                Op { op, result: ret, left, right } => format!("op {} {} {} {}", op.to_string(), ret, left, right),
+                Print(arg) => format!("print {}", disp!([arg])[0]),
+                PrintFlush(building) => format!("printflush {}", disp!([building])[0]),
+                Op { op, result: ret, left, right } => {
+                    let [ret, left, right] = disp!([ret, left, right]);
+                    format!("op {} {} {} {}", op.to_string(), ret, left, right)
+                },
                 Radar{ from, order, result: ret, sort, conds } => {
+                    let [from, order, ret] = disp!([from, order, ret]);
                     format!("radar {} {} {} {} {} {} {}",
                         conds[0], conds[1], conds[2],
                         sort, from, order, ret)
                 },
-                Sensor([store, block, sensable]) => format!("sensor {} {} {}", store, block, sensable),
-                Set { variable, value } => format!("set {} {}", variable, value),
-                UnitBind(unit) => format!("ubind {}", unit),
+                Sensor { result: ret, target, sensable } => {
+                    let [ret, target, sensable] = disp!([ret, target, sensable]);
+                    format!("sensor {} {} {}", ret, target, sensable)
+                },
+                Set { variable, value } => {
+                    let [variable, value] = disp!([variable, value]);
+                    format!("set {} {}", variable, value)
+                },
+                UnitBind(unit) => format!("ubind {}", disp!([unit])[0]),
                 _Raw(s) => s.clone(),
-                instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction))
+                instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction)),
             }
         )
     }
@@ -109,6 +165,7 @@ pub fn translate(ins: &[Ins]) -> Result<Vec<String>, String> {
 }
 
 pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
+    use optimizations::*;
     let mut res: Vec<Ins> = Vec::with_capacity(ins.len());
 
     let mut it = 0;
@@ -116,10 +173,26 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
         // Current INstruction
         let cin: &Ins = &ins[it];
 
+        // Checks if result of set or op is null, if so, removes them
+        if check_null_set_or_op(cin) {
+            // Removes current instruction
+            it += 1;
+            continue;
+        }
+
         // We need two instructions
         if it != ins.len() - 1 {
+
+            // Combines two set operations if the result of first
+            // is the value of the second, and they're temporary variables
+            if let Some(new_instruction) = combine_set_and_set(&ins[it], &ins[it + 1]) {
+                res.push(new_instruction);
+                it += 2;
+                continue;
+            }
+
             // Combines operations and jumps if possible
-            if let Some(new_instruction) = try_combine_op_and_jump(&ins[it], &ins[it + 1]) {
+            if let Some(new_instruction) = combine_op_and_jump(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
                 continue;
@@ -153,26 +226,22 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
 }
 
 /// Repeats [`optimize`] until it changes nothing
-pub fn repeated_optimize(ins: &[Ins]) -> Option<Vec<Ins>> {
-    if crate::ARGS.transopts {
-        let mut old_oins = optimize(ins);
-        loop {
-            let oins = optimize(&old_oins);
-            if oins == old_oins {
-                break Some(oins);
-            } else {
-                old_oins = oins;
-            }
+pub fn repeated_optimize(ins: &[Ins]) -> Vec<Ins> {
+    let mut old_oins = optimize(ins);
+    loop {
+        let oins = optimize(&old_oins);
+        if oins == old_oins {
+            break oins;
+        } else {
+            old_oins = oins;
         }
-    } else {
-        None
     }
 }
 
 /// The standard function to compile a [`ast::Statement`]
 ///
 /// Replaces the `ctx`'s arguments 
-pub fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
+pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
     use std::str::FromStr;
     let mut ins = Vec::new();
     let mut matched = true;
@@ -217,8 +286,7 @@ pub fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<Vec<Ins
 }
 
 fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
-    let args = ctx.args;
-    use Argument::*;
+    let Ctx { args, ret, .. } = ctx;
 
     if args.len() != 2 {
         return Err("set function accepts exactly two arguments".into());
@@ -227,7 +295,9 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let ident = expect_identifier(&args[0], "first argument to set must be an identifier")?;
 
     let (value, mut ins) = make_generic(ctx, &args[1])?;
-    ins.push(Ins::Set { variable: make_variable(ident), value });
+    let var = make_variable(ident);
+    ins.push(Ins::Set { variable: var.clone(), value });
+    ins.push(Ins::Set { variable: ret_or_null(ret), value: var });
 
     Ok(ins)
 }
@@ -262,7 +332,7 @@ fn raw_function(ctx: Ctx) -> Result<Ins, String> {
     }
 }
 
-pub fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
+pub(crate) fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
     let Ctx { args, ret, .. } = ctx;
     if op.unary() && args.len() != 1 {
         return Err(format!("Expression {:?} accepts exactly two arguments", op));
@@ -270,12 +340,6 @@ pub fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, String> {
         return Err(format!("Expression {:?} accepts exactly one argument", op));
     } else if !(1..=2).contains(&args.len()) {
         return Err("Expressions can only have one or two arguments".into());
-    }
-
-    // A slight optimization
-    // NOTE This should probably be in `optimize`, but for now is here
-    if ret.is_none() && !args[0].is_statement() && !args[1].is_statement() {
-        return Ok(vec![]);
     }
 
     let (left, mut ins) = make_generic(ctx, &args[0])?;
@@ -310,8 +374,8 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
 
 
-    let back_label = generate_label();
-    let forward_label = generate_label();
+    let back_label = generate_label(ctx);
+    let forward_label = generate_label(ctx);
     ins.push(Ins::Label(back_label));
     ins.extend(condition_ins);
     ins.push(Ins::Jump { label: forward_label, cmp: Comparison::StrictEquals, left: condition, right: zero() });
@@ -325,7 +389,7 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 }
 
 /// Cleanly passes through N arguments
-pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(Vec<Ins>, [Arg; N]), String> {
+pub(crate) fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(Vec<Ins>, [Arg; N]), String> {
     let args = ctx.args;
 
     let mut ins = Vec::new();
@@ -342,67 +406,6 @@ pub fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(
     }
 
     Ok((ins, argvec.try_into().unwrap()))
-}
-
-fn try_combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
-    match (ins1, ins2) {
-        ( Ins::Op { op: opr, result, left: oarg0, right: oarg1 },
-          Ins::Jump { label, cmp, left: jarg0, right: jarg1 } ) => {
-            if !matches!(cmp, Comparison::StrictEquals) {
-                return None
-            }
-
-            let opr_as_cmp: Comparison = (*opr).try_into().ok()?;
-            if opr_as_cmp == Comparison::StrictEquals || opr_as_cmp == Comparison::Always {
-                return None;
-            }
-
-            if result == jarg0 {
-                if let Arg::Literal(Type::Num(other)) = jarg1 {
-                    if *other == 0.0 {
-                        return Some(
-                            Ins::Jump {
-                                label: *label,
-                                cmp: -opr_as_cmp,
-                                left: oarg0.clone(),
-                                right: oarg1.clone()
-                            });
-                    }
-                }
-            }
-
-            if result == jarg1 {
-                if let Arg::Literal(Type::Num(other)) = jarg0 {
-                    if *other == 0.0 {
-                        return Some(
-                            Ins::Jump {
-                                label: *label,
-                                cmp: -opr_as_cmp,
-                                left: oarg0.clone(),
-                                right: oarg1.clone()
-                            });
-                    }
-                }
-            }
-        },
-        _ => return None
-    };
-    None
-}
-
-fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
-    match (ins1, ins2) {
-        ( Ins::Op { op, result: Arg::Variable(resvar), left, right },
-          Ins::Set { variable, value: Arg::Variable(setvalue) } ) => {
-            if resvar == setvalue {
-                return Some(Ins::Op {
-                    op: *op, result: variable.clone(), left: left.clone(), right: right.clone()
-                });
-            }
-        },
-        _ => return None
-    };
-    None
 }
 
 fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -425,36 +428,35 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
     let statement_ins =
         if let Argument::Statement(stmnt) = &args[0] {
-            let ret = generate_variable();
-            compile_statement(stmnt, ctx.with_ret(&ret))?
+            compile_statement(stmnt, ctx.no_ret())?
         } else {
             return Err("iterlinks argument must be a statement".into());
     };
 
-    let itervar = generate_variable();
-    let repeat_label = generate_label();
-    let exit_label = generate_label();
+    let itervar = generate_variable(ctx);
+    let repeat_label = generate_label(ctx);
+    let exit_label = generate_label(ctx);
 
-    ins.push(Ins::Set { variable: str_to_var(&itervar), value: zero() });
+    ins.push(Ins::Set { variable: itervar.clone(), value: zero() });
     ins.push(Ins::Label(repeat_label));
-    ins.push(Ins::GetLink { store: str_to_var("link"), index: str_to_var(&itervar) });
+    ins.push(Ins::GetLink { store: str_to_var("link"), index: itervar.clone() });
     ins.push(Ins::Jump {
         label: exit_label,
         cmp: Comparison::StrictEquals,
-        left: str_to_var(&itervar),
+        left: itervar.clone(),
         right: str_to_var("null")
     });
     ins.extend(statement_ins);
     ins.push(Ins::Op {
         op: Operation::Plus,
-        result: str_to_var(&itervar),
-        left: str_to_var(&itervar),
+        result: itervar.clone(),
+        left: itervar.clone(),
         right: one()
     });
     ins.push(Ins::Jump {
         label: repeat_label,
         cmp: Comparison::LessThan,
-        left: str_to_var(&itervar),
+        left: itervar,
         right: str_to_var("@links")
     });
     ins.push(Ins::Label(exit_label));
@@ -481,14 +483,14 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
         return Err("sensor function accepts exactly two arguments".into());
     }
 
-    let block = make_variable(expect_identifier(&args[0], "first argument `block' to sensor must be an identifier")?);
+    let target = make_variable(expect_identifier(&args[0], "first argument `block' to sensor must be an identifier")?);
     let sensable = expect_identifier(&args[1], "second argument `sensable' to sensor must be an identifier")?;
     if sensable.as_bytes()[0] != b'@' {
         warn!("second argument `sensable' to sensor should probably begin with a @");
     }
 
     let sensable = make_variable(sensable);
-    Ok(Ins::Sensor([ret_or_null(ret), block, sensable]))
+    Ok(Ins::Sensor { result: ret_or_null(ret), target, sensable })
 }
 
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -582,7 +584,7 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
     };
 
-    ins.push(Ins::Control{ target, subcommand});
+    ins.push(Ins::Control{ target, subcommand });
     Ok(ins)
 }
 
@@ -657,31 +659,13 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     Ok(ins)
 }
 
-fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
-    match (ins1, ins2) {
-        ( Ins::Radar { result: Arg::Variable(resvar), .. },
-          Ins::Set { variable, value: Arg::Variable(setvalue) }) => {
-            if resvar == setvalue {
-                let mut new_ins: Ins = ins1.clone();
-                match new_ins {
-                    Ins::Radar { ref mut result, .. } => *result = variable.clone(),
-                    _ => unreachable!()
-                };
-                return Some(new_ins);
-            }
-        },
-        _ => return None
-    };
-    None
-}
-
 fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let Ctx { args, ret, .. } = ctx;
 
     let mut argi = args.iter().peekable();
 
-    let mut next_label = generate_label();
-    let end_label = generate_label();
+    let mut next_label = generate_label(ctx);
+    let end_label = generate_label(ctx);
 
     // if part
     let (condition, mut ins) = make_generic(ctx, argi.next().ok_or("if function missing a condition")?)?;
@@ -720,7 +704,7 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                         ins.push(Ins::Label (next_label));
                         ins.extend(condition_ins);
 
-                        next_label = generate_label();
+                        next_label = generate_label(ctx);
 
                         ins.push(Ins::Jump {
                             label: next_label,

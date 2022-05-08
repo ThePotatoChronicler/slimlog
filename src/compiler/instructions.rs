@@ -1,9 +1,24 @@
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    borrow::Cow,
+    collections::HashMap,
+};
+use rand::rngs::StdRng;
+use super::{
+    settings::Settings,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     Literal(Type),
-    Variable(String)
+    Variable(Vartype)
+}
+
+/// Type of variable
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Vartype {
+    Named(String),
+    Unnamed(usize)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,8 +60,12 @@ pub enum Ins {
         sort: TargetSort,
         conds: [TargetProp; 3]
     },
-    /// sensor store block sensable
-    Sensor([Arg; 3]),
+    /// sensor result target sensable
+    Sensor {
+        result: Arg,
+        target: Arg,
+        sensable: Arg
+    },
     /// set variable value
     Set {
         variable: Arg,
@@ -260,25 +279,6 @@ pub enum BuildingGroup {
     Reactor
 }
 
-impl std::fmt::Display for Arg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let fstring;
-        f.write_str(match self {
-            Arg::Literal(t) => {
-                match t {
-                    Type::Num(f) => {
-                        fstring = f.to_string();
-                        &fstring
-                    },
-                    Type::Str(s) => s
-                }
-            },
-            Arg::Variable(v) => v
-        }).expect("Failed to write to Formatter");
-        Ok(())
-    }
-}
-
 /// Panics when fails, for non-panicking version, check out TryFrom<Operation> for String
 impl ToString for Operation {
     fn to_string(&self) -> String {
@@ -472,6 +472,54 @@ impl Arg {
     pub fn is_var(&self) -> bool {
         matches!(self, Arg::Variable(_))
     }
+
+    /// Displays an Arg
+    pub fn display<'a, 't>(
+        &'a self,
+        rng: &'t mut StdRng,
+        map: &'t mut HashMap<usize, String>,
+        settings: &'t Settings)
+        -> Cow<'a, str>
+    {
+        match self {
+            Arg::Literal(t) => {
+                match t {
+                    Type::Num(f) => {
+                        Cow::Owned(f.to_string())
+                    },
+                    Type::Str(s) => Cow::Borrowed(s)
+                }
+            },
+            Arg::Variable(v) => match v {
+                Vartype::Named(s) => Cow::Borrowed(s),
+                Vartype::Unnamed(n) => {
+                    if settings.get_hex_unnamed_vars() {
+                        if map.contains_key(&n) {
+                            return Cow::Owned(map[n].clone());
+                        }
+
+                        use rand::Rng;
+
+                        let varlen = settings.get_hex_var_length();
+
+                        const CHARSET: &[u8] = b"0123456789abcdef";
+                        let mut var = String::with_capacity(2 + varlen as usize);
+                        var.push_str("__");
+
+                        for _ in 0..varlen {
+                            var.push(CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+                        }
+
+                        map.insert(*n, var.clone());
+
+                        Cow::Owned(var)
+                    } else {
+                        Cow::Owned(format!("__{}", n))
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Type {
@@ -583,18 +631,21 @@ impl std::fmt::Display for TargetProp {
     }
 }
 
+impl From<Vartype> for Arg {
+    fn from(var: Vartype) -> Self {
+        Arg::Variable(var)
+    }
+}
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn type_cmp() {
         use crate::compiler::instructions::{
-            Arg::*, Type::*
+            Arg::*, Type::*, Vartype
         };
         assert!(Literal(Num(5.0)).cmp(&Literal(Num(10.0))));
         assert!(Literal(Str("Pain".into())).cmp(&Literal(Str("Suffering".into()))));
-        assert!(Variable("Pain".into()).cmp(&Variable("Suffering".into())));
+        assert!(Variable(Vartype::Named("Pain".into())).cmp(&Variable(Vartype::Named("Suffering".into()))));
     }
 }
-
-

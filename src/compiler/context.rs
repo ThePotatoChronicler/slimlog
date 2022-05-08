@@ -4,29 +4,49 @@ use super::{
     ast::{
         Argument
     },
+    instructions::Vartype,
 };
 
-/// Context for all compiler functions
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Ctx<'a, 'r> {
-    pub args: &'a [Argument<'a>],
-    pub ret: Option<&'r str>
+use std::cell::Cell;
+
+/// Holds the data necessary to create a [`Ctx`]
+#[derive(Debug)]
+pub struct Context {
+    seq: Cell<usize>
 }
 
-impl<'a, 'r> Ctx<'a, 'r> {
+/// Context for all compiler functions
+#[derive(Copy, Clone, Debug)]
+pub struct Ctx<'a, 'r, 's> {
+    /// Arguments
+    pub args: &'a [Argument<'a>],
+    /// Return
+    pub ret: Option<&'r Vartype>,
+    /// Sequence of numbers
+    seq: &'s Cell<usize>,
+}
 
-    /// Alias for `default`
-    pub fn empty() -> Self {
-        Ctx::default()
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            seq: Cell::new(0)
+        }
     }
 
-    /// Creates a new empty context and sets it's `ret`
-    pub fn just_ret(ret: &'r str) -> Self {
-        Self::empty().with_ret(ret)
+    /// Creates an empty child Ctx
+    pub fn create_empty_ctx(&self) -> Ctx {
+        Ctx {
+            args: &[],
+            ret: None,
+            seq: &self.seq
+        }
     }
+}
+
+impl<'a, 'r, 's> Ctx<'a, 'r, 's> {
 
     /// Uses the currect context, but replaces `ret`
-    pub fn with_ret(&self, ret: &'r str) -> Self {
+    pub fn with_ret(&self, ret: &'r Vartype) -> Self {
         let mut ctx = *self;
         ctx.ret = Some(ret);
         ctx
@@ -39,11 +59,6 @@ impl<'a, 'r> Ctx<'a, 'r> {
         ctx
     }
 
-    /// Creates an empty context and replaces it's `ret`
-    pub fn from_ret(ret: &'r str) -> Self {
-        Ctx::empty().with_ret(ret)
-    }
-
     /// Uses the currect context, but replaces `args`
     pub fn with_args(&self, args: &'a [Argument]) -> Self {
         let mut ctx = *self;
@@ -54,5 +69,11 @@ impl<'a, 'r> Ctx<'a, 'r> {
     /// Returns the same context but with no `args`
     pub fn no_args(&self) -> Self {
         self.with_args(&[])
+    }
+
+    pub fn get_next(&self) -> usize {
+        let current = self.seq.get();
+        self.seq.set(current + 1);
+        current
     }
 }

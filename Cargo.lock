@@ -359,7 +359,6 @@ dependencies = [
  "digest",
  "env_logger",
  "hex",
- "lazy_static",
  "log",
  "nom",
  "nom_locate",
