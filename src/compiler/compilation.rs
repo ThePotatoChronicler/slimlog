@@ -53,7 +53,9 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
     use rand::SeedableRng;
 
     let optimized_instructions = if settings.get_transopts() {
-        Some(repeated_optimize(ins))
+        let optimized = repeated_optimize(ins);
+        debug!("Optimized instructions: {:#?}", optimized);
+        Some(optimized)
     } else {
         None
     };
@@ -80,7 +82,7 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
     // Rng used to create random hex vars
     let mut rng = rand::rngs::StdRng::from_seed(*seed);
     // Map used to keep track of number to name relationships
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
 
     // A macro to aid us in this messy world
     macro_rules! disp {
@@ -98,24 +100,32 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     let [target] = disp!([target]);
                     use instructions::ControlSI::*;
                     match subcommand {
-                        Enabled(enabled) => format!("control enabled {} {}", target, disp!(enabled)),
+                        Enabled(enabled) => {
+                            let enabled = disp!(enabled);
+                            format!("control enabled {target} {enabled}")
+                        },
                         Shoot { x, y, shoot } => {
                             let [x, y, shoot] = disp!([x, y, shoot]);
-                            format!("control shoot {} {} {} {}", target, x, y, shoot)
+                            format!("control shoot {target} {x} {y} {shoot}")
                         },
                         Shootp { unit, shoot } => {
                             let [unit, shoot] = disp!([unit, shoot]);
-                            format!("control shootp {} {} {}", target, unit, shoot)
+                            format!("control shootp {target} {unit} {shoot}")
                         },
-                        Configure(configuration) => format!("control configure {} {}", target, disp!([configuration])[0]),
+                        Configure(configuration) => {
+                            let configuration = disp!(configuration);
+                            format!("control configure {target} {configuration}")
+                        },
                         Color { r, g, b } => {
                             let [r, g, b] = disp!([r, g, b]);
-                            format!("control color {} {} {} {}", target, r, g, b)
+                            format!("control color {target} {r} {g} {b}")
                         },
                     }
                 },
                 End => "end".into(),
                 Label(_) => {
+                    // Adds an `end` instruction at the end of the output if there isn't
+                    // any instruction to jump to
                     if inst == ins.len() - 1 {
                         "end".into()
                     } else {
@@ -124,7 +134,7 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                 },
                 GetLink { store, index } => {
                     let [store, index] = disp!([store, index]);
-                    format!("getlink {} {}", store, index)
+                    format!("getlink {store} {index}")
                 },
                 Jump { label, cmp, left, right } => {
                     if !labels.contains_key(label) {
@@ -132,29 +142,35 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     }
                     let cmpstr: &'static str = (*cmp).into();
                     let [left, right] = disp!([left, right]);
-                    format!("jump {} {} {} {}", labels[label], cmpstr, left, right)
+                    let linenum = labels[label];
+                    format!("jump {linenum} {cmpstr} {left} {right}")
                 },
-                Print(arg) => format!("print {}", disp!([arg])[0]),
-                PrintFlush(building) => format!("printflush {}", disp!([building])[0]),
+                Print(arg) => format!("print {}", disp!(arg)),
+                PrintFlush(building) => format!("printflush {}", disp!(building)),
                 Op { op, result: ret, left, right } => {
                     let [ret, left, right] = disp!([ret, left, right]);
-                    format!("op {} {} {} {}", op.to_string(), ret, left, right)
+                    let str_op = op.to_string();
+                    format!("op {str_op} {ret} {left} {right}")
                 },
-                Radar{ from, order, result: ret, sort, conds } => {
+                Radar { from, order, result: ret, sort, conds } => {
                     let [from, order, ret] = disp!([from, order, ret]);
-                    format!("radar {} {} {} {} {} {} {}",
-                        conds[0], conds[1], conds[2],
-                        sort, from, order, ret)
+                    let [cond1, cond2, cond3] = conds;
+                    format!("radar {cond1} {cond2} {cond3} {sort} {from} {order} {ret}")
                 },
                 Sensor { result: ret, target, sensable } => {
                     let [ret, target, sensable] = disp!([ret, target, sensable]);
-                    format!("sensor {} {} {}", ret, target, sensable)
+                    format!("sensor {ret} {target} {sensable}")
                 },
                 Set { variable, value } => {
                     let [variable, value] = disp!([variable, value]);
-                    format!("set {} {}", variable, value)
+                    format!("set {variable} {value}")
                 },
-                UnitBind(unit) => format!("ubind {}", disp!([unit])[0]),
+                UnitBind(unit) => format!("ubind {}", disp!(unit)),
+                UnitRadar { order, result: ret, sort, conds } => {
+                    let [order, ret] = disp!([order, ret]);
+                    let [cond1, cond2, cond3] = conds;
+                    format!("uradar {cond1} {cond2} {cond3} {sort} 0 {order} {ret}")
+                },
                 _Raw(s) => s.clone(),
                 instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction)),
             }
@@ -228,11 +244,14 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
 /// Repeats [`optimize`] until it changes nothing
 pub fn repeated_optimize(ins: &[Ins]) -> Vec<Ins> {
     let mut old_oins = optimize(ins);
+    let mut count = 1;
     loop {
         let oins = optimize(&old_oins);
         if oins == old_oins {
+            debug!("Optimization cycles count: {}", count);
             break oins;
         } else {
+            count += 1;
             old_oins = oins;
         }
     }
@@ -268,9 +287,10 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             i.push(Ins::Print(newline()));
             ins.extend(i);
         },
+        "uradar" => ins.extend(uradar_function(newctx)?),
         "while" => ins.extend(while_function(newctx)?),
         "_raw" => ins.push(raw_function(newctx)?),
-        _ => matched = false
+        _ => matched = false,
     };
 
     if matched {
@@ -485,7 +505,7 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
 
     let target = make_variable(expect_identifier(&args[0], "first argument `block' to sensor must be an identifier")?);
     let sensable = expect_identifier(&args[1], "second argument `sensable' to sensor must be an identifier")?;
-    if sensable.as_bytes()[0] != b'@' {
+    if !sensable.starts_with('@') {
         warn!("second argument `sensable' to sensor should probably begin with a @");
     }
 
@@ -595,7 +615,7 @@ fn bind_function(ctx: Ctx) -> Result<Ins, String> {
     }
 
     let ident = expect_identifier(&args[0], "bind function's argument must be an identifier")?;
-    if ident.as_bytes()[0] != b'@' {
+    if !ident.starts_with('@') {
         warn!("bind function's argument should probably begin with a @");
     }
 
@@ -650,6 +670,61 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     ins.push(Ins::Radar {
         from,
+        order,
+        result: ret_or_null(ret),
+        sort,
+        conds
+    });
+
+    Ok(ins)
+}
+
+
+/// uradar <sort> <order> <prop> <prop> <prop>
+///
+/// This function is basically just [`radar_function`]
+/// without the `from` argument, but this is the easiest way to handle it.
+/// TODO Maybe figure out a better way without duplicating code
+fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::{ TargetProp, TargetSort };
+    let Ctx { args, ret, .. } = ctx;
+
+    if args.len() > 5 {
+        return Err("Radar accepts 5 or less arguments".into());
+    }
+
+    let mut ins = Vec::new();
+    let mut order: Arg = make_num(1);
+    let mut sort: TargetSort = TargetSort::Distance;
+    let mut conds: [TargetProp; 3] = [TargetProp::Any, TargetProp::Any, TargetProp::Any];
+
+    if !args.is_empty() {
+        let ident = expect_identifier(&args[1], "The `sort` argument to radar must be an identifier")?;
+        sort = ident.parse().map_err(|_| "First argument to radar must be a valid sort")?;
+
+        if args.len() >= 2 {
+            let (neworder, newins) = make_not_string(ctx, &args[2], "Second argument to radar cannot be a string")?;
+            order = neworder;
+            ins.extend(newins);
+        }
+
+        if args.len() >= 3 {
+            let ident = expect_identifier(&args[3], "The first condition argument to radar must be an identifier")?;
+            conds[0] = ident.parse().map_err(|_| "Third argument to radar must be a valid condition")?;
+        }
+
+        if args.len() >= 4 {
+            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
+            conds[1] = ident.parse().map_err(|_| "Fourth argument to radar must be a valid condition")?;
+        }
+
+        if args.len() >= 5 {
+            let ident = expect_identifier(&args[5], "The second condition argument to radar must be an identifier")?;
+            conds[2] = ident.parse().map_err(|_| "Fifth argument to radar must be a valid condition")?;
+        }
+    }
+
+    ins.push(Ins::UnitRadar {
         order,
         result: ret_or_null(ret),
         sort,

@@ -402,7 +402,7 @@ impl TryFrom<Operation> for Comparison {
 }
 
 impl TryFrom<Comparison> for Operation {
-    type Error = String;
+    type Error = ();
     fn try_from(op: Comparison) -> Result<Self, Self::Error> {
         Ok(match op {
             Comparison::Equals => Operation::Equals,
@@ -412,7 +412,7 @@ impl TryFrom<Comparison> for Operation {
             Comparison::GreaterThan => Operation::GreaterThan,
             Comparison::GreaterOrEqual => Operation::GreaterOrEqual,
             Comparison::StrictEquals => Operation::StrictEquals,
-            _ => return Err(format!("{:?} is not a Comparison", op))
+            _ => return Err(())
         })
     }
 }
@@ -494,7 +494,7 @@ impl Arg {
                 Vartype::Named(s) => Cow::Borrowed(s),
                 Vartype::Unnamed(n) => {
                     if settings.get_hex_unnamed_vars() {
-                        if map.contains_key(&n) {
+                        if map.contains_key(n) {
                             return Cow::Owned(map[n].clone());
                         }
 
@@ -531,12 +531,11 @@ impl Type {
     }
 }
 
-/// Inverts Comparison into it's opposite
-impl std::ops::Neg for Comparison {
-    type Output = Comparison;
-    fn neg(self) -> Self::Output {
+impl Comparison {
+    /// Inverts Comparison into it's opposite
+    pub fn negate(self) -> Option<Self> {
         use Comparison::*;
-        match self {
+        Some(match self {
             Equals => NotEquals,
             NotEquals => Equals,
             LessThan => GreaterOrEqual,
@@ -550,8 +549,8 @@ impl std::ops::Neg for Comparison {
                     );
                 NotEquals
             },
-            Always => panic!("Always cannot be negated!")
-        }
+            Always => return None
+        })
     }
 }
 

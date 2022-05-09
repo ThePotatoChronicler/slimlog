@@ -41,6 +41,13 @@ pub(crate) fn combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
                 return None
             }
 
+            // Make sure that we're not deleting an op with a named result
+            /*
+            if !matches!(result, Arg::Variable(Vartype::Unnamed(_))) {
+                return None;
+            }
+            */
+
             let opr_as_cmp: Comparison = (*opr).try_into().ok()?;
             if opr_as_cmp == Comparison::StrictEquals || opr_as_cmp == Comparison::Always {
                 return None;
@@ -52,7 +59,7 @@ pub(crate) fn combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
                         return Some(
                             Ins::Jump {
                                 label: *label,
-                                cmp: -opr_as_cmp,
+                                cmp: opr_as_cmp.negate().unwrap(),
                                 left: oarg0.clone(),
                                 right: oarg1.clone()
                             });
@@ -66,7 +73,7 @@ pub(crate) fn combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
                         return Some(
                             Ins::Jump {
                                 label: *label,
-                                cmp: -opr_as_cmp,
+                                cmp: opr_as_cmp.negate().unwrap(),
                                 left: oarg0.clone(),
                                 right: oarg1.clone()
                             });
@@ -79,6 +86,7 @@ pub(crate) fn combine_op_and_jump(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     None
 }
 
+/// Used to combine `set foo (+ 5 10)`
 pub(crate) fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
         ( Ins::Op { op, result: Arg::Variable(resvar), left, right },
