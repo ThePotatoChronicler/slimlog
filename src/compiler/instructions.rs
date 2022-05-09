@@ -116,25 +116,74 @@ pub enum Ins {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DrawSI {
     /// clear r, g, b
-    Clear([Arg; 3]),
-    /// color r, g, b
-    Color([Arg; 3]),
+    Clear {
+        r: Arg,
+        g: Arg,
+        b: Arg,
+    },
+    /// color r, g, b, a
+    Color {
+        r: Arg,
+        g: Arg,
+        b: Arg,
+        a: Arg,
+    },
     /// stroke width
     Stroke(Arg),
     /// line x1, y1, x2, y2
-    Line([Arg; 4]),
+    Line {
+        x1: Arg,
+        y1: Arg,
+        x2: Arg,
+        y2: Arg,
+    },
     /// rect x, y, w, h
-    Rect([Arg; 4]),
+    Rect {
+        x: Arg,
+        y: Arg,
+        width: Arg,
+        height: Arg,
+    },
     /// lineRect x, y, w, h
-    LineRect([Arg; 4]),
+    LineRect {
+        x: Arg,
+        y: Arg,
+        width: Arg,
+        height: Arg,
+    },
     /// poly x, y, sides, radius, rotation
-    Poly([Arg; 5]),
+    Poly {
+        x: Arg,
+        y: Arg,
+        sides: Arg,
+        radius: Arg,
+        rotation: Arg,
+    },
     /// linePoly x, y, sides, radius, rotation
-    LinePoly([Arg; 5]),
+    LinePoly {
+        x: Arg,
+        y: Arg,
+        sides: Arg,
+        radius: Arg,
+        rotation: Arg,
+    },
     /// triangle x1, y1, x2, y2, x3, y3
-    Triangle([Arg; 6]),
+    Triangle {
+        x1: Arg,
+        y1: Arg,
+        x2: Arg,
+        y2: Arg,
+        x3: Arg,
+        y3: Arg,
+    },
     /// image x, y, image, size, rotation
-    Image([Arg; 4])
+    Image {
+        x: Arg,
+        y: Arg,
+        image: Arg,
+        size: Arg,
+        rotation: Arg,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

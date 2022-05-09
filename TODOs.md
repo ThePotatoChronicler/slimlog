@@ -6,3 +6,4 @@
   not use Vec, to not have extranneous allocations.
 - [ ] Replace tuple struct instructions with c-like structures,
   because I forgot those exist
+- [ ] Check functions for allowing extra arguments

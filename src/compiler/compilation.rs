@@ -86,10 +86,16 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
 
     // A macro to aid us in this messy world
     macro_rules! disp {
-        ($single:ident) => { $single.display(&mut rng, &mut map, settings) };
-        ([$($list:ident),*]) => {{
-            [$($list),*].map(|s| s.display(&mut rng, &mut map, settings))
-        }};
+        ($single:ident) => {
+             $single.display(&mut rng, &mut map, settings)
+        };
+        ([$single:ident]) => {
+            let $single = $single.display(&mut rng, &mut map, settings);
+        };
+        ([$single:ident, $($list:ident), +]) => {
+            disp!([$single]);
+            disp!([$($list), +]);
+        };
     }
 
     for inst in 0..ins.len() {
@@ -97,31 +103,76 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
         result.push(
             match &ins[inst] {
                 Control { target, subcommand } => {
-                    let [target] = disp!([target]);
+                    disp!([target]);
                     use instructions::ControlSI::*;
                     match subcommand {
                         Enabled(enabled) => {
-                            let enabled = disp!(enabled);
+                            disp!([enabled]);
                             format!("control enabled {target} {enabled}")
                         },
                         Shoot { x, y, shoot } => {
-                            let [x, y, shoot] = disp!([x, y, shoot]);
+                            disp!([x, y, shoot]);
                             format!("control shoot {target} {x} {y} {shoot}")
                         },
                         Shootp { unit, shoot } => {
-                            let [unit, shoot] = disp!([unit, shoot]);
+                            disp!([unit, shoot]);
                             format!("control shootp {target} {unit} {shoot}")
                         },
                         Configure(configuration) => {
-                            let configuration = disp!(configuration);
+                            disp!([configuration]);
                             format!("control configure {target} {configuration}")
                         },
                         Color { r, g, b } => {
-                            let [r, g, b] = disp!([r, g, b]);
+                            disp!([r, g, b]);
                             format!("control color {target} {r} {g} {b}")
                         },
                     }
                 },
+                Draw(subcommand) => {
+                    use instructions::DrawSI::*;
+                    match subcommand {
+                        Clear { r, g, b } => {
+                            disp!([r, g, b]);
+                            format!("draw clear {r} {g} {b}")
+                        },
+                        Color { r, g, b, a } => {
+                            disp!([r, g, b, a]);
+                            format!("draw color {r} {g} {b} {a}")
+                        },
+                        Stroke(stroke) => {
+                            disp!([stroke]);
+                            format!("draw stroke {stroke}")
+                        },
+                        Line { x1, y1, x2, y2 } => {
+                            disp!([x1, y1, x2, y2]);
+                            format!("draw line {x1} {y1} {x2} {y2}")
+                        },
+                        Rect { x, y, width, height } => {
+                            disp!([x, y, width, height]);
+                            format!("draw rect {x} {y} {width} {height}")
+                        },
+                        LineRect { x, y, width, height } => {
+                            disp!([x, y, width, height]);
+                            format!("draw lineRect {x} {y} {width} {height}")
+                        },
+                        Poly { x, y, sides, radius, rotation } => {
+                            disp!([x, y, sides, radius, rotation]);
+                            format!("draw poly {x} {y} {sides} {radius} {rotation}")
+                        },
+                        LinePoly { x, y, sides, radius, rotation } => {
+                            disp!([x, y, sides, radius, rotation]);
+                            format!("draw linePoly {x} {y} {sides} {radius} {rotation}")
+                        },
+                        Triangle { x1, y1, x2, y2, x3, y3 } => {
+                            disp!([x1, y1, x2, y2, x3, y3]);
+                            format!("draw triangle {x1} {y1} {x2} {y2} {x3} {y3}")
+                        },
+                        Image { x, y, image, size, rotation } => {
+                            disp!([x, y, image, size, rotation]);
+                            format!("draw image {x} {y} {image} {size} {rotation}")
+                        }
+                    }
+                }
                 End => "end".into(),
                 Label(_) => {
                     // Adds an `end` instruction at the end of the output if there isn't
@@ -133,7 +184,7 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     }
                 },
                 GetLink { store, index } => {
-                    let [store, index] = disp!([store, index]);
+                    disp!([store, index]);
                     format!("getlink {store} {index}")
                 },
                 Jump { label, cmp, left, right } => {
@@ -141,33 +192,35 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                         return Err("Missing label, this should never happen! Contact author(s)".into())
                     }
                     let cmpstr: &'static str = (*cmp).into();
-                    let [left, right] = disp!([left, right]);
+                    disp!([left, right]);
                     let linenum = labels[label];
                     format!("jump {linenum} {cmpstr} {left} {right}")
                 },
                 Print(arg) => format!("print {}", disp!(arg)),
-                PrintFlush(building) => format!("printflush {}", disp!(building)),
+                PrintFlush(building) => {
+                    format!("printflush {}", disp!(building))
+                },
                 Op { op, result: ret, left, right } => {
-                    let [ret, left, right] = disp!([ret, left, right]);
+                    disp!([ret, left, right]);
                     let str_op = op.to_string();
                     format!("op {str_op} {ret} {left} {right}")
                 },
                 Radar { from, order, result: ret, sort, conds } => {
-                    let [from, order, ret] = disp!([from, order, ret]);
+                    disp!([from, order, ret]);
                     let [cond1, cond2, cond3] = conds;
                     format!("radar {cond1} {cond2} {cond3} {sort} {from} {order} {ret}")
                 },
                 Sensor { result: ret, target, sensable } => {
-                    let [ret, target, sensable] = disp!([ret, target, sensable]);
+                    disp!([ret, target, sensable]);
                     format!("sensor {ret} {target} {sensable}")
                 },
                 Set { variable, value } => {
-                    let [variable, value] = disp!([variable, value]);
+                    disp!([variable, value]);
                     format!("set {variable} {value}")
                 },
                 UnitBind(unit) => format!("ubind {}", disp!(unit)),
                 UnitRadar { order, result: ret, sort, conds } => {
-                    let [order, ret] = disp!([order, ret]);
+                    disp!([order, ret]);
                     let [cond1, cond2, cond3] = conds;
                     format!("uradar {cond1} {cond2} {cond3} {sort} 0 {order} {ret}")
                 },
@@ -269,6 +322,7 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
         "bind" => ins.push(bind_function(newctx)?),
         "control" => ins.extend(control_function(newctx)?),
         "do" => ins.extend(do_function(newctx)?),
+        "draw" => ins.extend(draw_function(newctx)?),
         "getlink" => ins.extend(getlink_function(newctx)?),
         "if" => ins.extend(if_function(newctx)?),
         "iterlinks" => ins.extend(iterlinks_function(newctx)?),
@@ -817,6 +871,100 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     ins.push(Ins::Label(end_label));
+
+    Ok(ins)
+}
+
+fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::DrawSI;
+    let Ctx { args, .. } = ctx;
+    let mut argi = args.iter();
+
+    let mut ins = Vec::new();
+
+    // A macro to make this function waaay shorter
+    macro_rules! notstr {
+        ($subcommand:ident, $var:ident) => {
+            let $var = {
+                let var = argi.next().ok_or(
+                    // draw subcommand missing `var'
+                    concat!("draw ", stringify!($subcommand),
+                    " missing `", stringify!($var),"'"
+                    )
+                    )?;
+                let (var, newins) = make_not_string(ctx, var,
+                    // draw subcommand argument`var' cannot be a string
+                    concat!("draw ", stringify!($subcommand)," argument `",
+                    stringify!($var),"' cannot be a string")
+                    )?;
+                ins.extend(newins);
+                var
+            };
+        };
+        ($subcommand:ident, $var:ident, $($vars:ident),+) => {
+            notstr!($subcommand, $var);
+            notstr!($subcommand, $($vars),+);
+        };
+    }
+
+    let subcommand = argi.next().ok_or("Draw function missing subcommand")?;
+    let subcommand = expect_identifier(subcommand, "draw subcommand must be an identifier")?;
+    let si: DrawSI = match *subcommand {
+        "clear" => {
+            notstr!(clear, r, g, b);
+            DrawSI::Clear { r, g, b }
+        },
+        "color" => {
+            notstr!(color, r, g, b, a);
+            DrawSI::Color { r, g, b, a }
+        },
+        "stroke" => {
+            notstr!(stroke, w);
+            DrawSI::Stroke(w)
+        },
+        "line" => {
+            notstr!(line, x1, y1, x2, y2);
+            DrawSI::Line { x1, y1, x2, y2 }
+        },
+        "rect" => {
+            notstr!(rect, x, y, width, height);
+            DrawSI::Rect { x, y, width, height }
+        },
+        "linerect" => {
+            notstr!(linerect, x, y, width, height);
+            DrawSI::LineRect { x, y, width, height }
+        },
+        "poly" => {
+            notstr!(poly, x, y, sides, radius, rotation);
+            DrawSI::Poly { x, y, sides, radius, rotation }
+        },
+        "linepoly" => {
+            notstr!(linepoly, x, y, sides, radius, rotation);
+            DrawSI::LinePoly { x, y, sides, radius, rotation }
+        },
+        "triangle" => {
+            notstr!(triangle, x1, y1, x2, y2, x3, y3);
+            DrawSI::Triangle { x1, y1, x2, y2, x3, y3 }
+        },
+        "image" => {
+            notstr!(image, x, y);
+            let image = argi.next().ok_or("draw image missing argument `image'")?;
+            let image = expect_identifier(image, "draw image argument `image' must be an identifier")?;
+            if !image.starts_with('@') {
+                warn!("draw image argument `image' should probably begin with a @");
+            }
+            let image = make_variable(image);
+            notstr!(image, size, rotation);
+            DrawSI::Image { x, y, image, size, rotation }
+        }
+        _ => return Err(format!("Unknown draw subcommand `{}'", *subcommand)),
+    };
+
+    if argi.len() > 0 {
+        return Err(format!("Extra arguments to draw subcommand `{}'", *subcommand));
+    }
+
+    ins.push(Ins::Draw(si));
 
     Ok(ins)
 }
