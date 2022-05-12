@@ -569,94 +569,82 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
 
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     use instructions::ControlSI;
-    let args = ctx.args;
+    let Ctx { args, .. } = ctx;
     if !matches!(args.len(), 2..=5) {
         return Err("control accepts between 2 and 5 arguments".into())
     }
 
-    let mut ins = vec![];
+    let mut ins = Vec::with_capacity(3);
+    let mut argi = args.iter();
 
+    let target = argi.next().ok_or("control missing required argument `target'")?;
     let target = make_variable(
-        expect_identifier(&args[0], "first argument `target' to control function must be an identifier")?);
-    let subcommand = expect_identifier(&args[1], "second argument `subcommand' to control function must be an identifier")?;
+        expect_identifier(target, "first argument `target' to control function must be an identifier")?);
+    let subcmd = argi.next().ok_or("control missing required argument `subcommand'")?;
+    let subcmd = expect_identifier(subcmd, "second argument `subcommand' to control function must be an identifier")?;
 
-    let subcommand = match *subcommand {
+    // Macro to make this function slightly shorter
+    macro_rules! notstr {
+        ($subcommand:ident, $var:ident) => {
+            let $var = {
+                let var = argi.next().ok_or(
+                    // draw subcommand missing `var'
+                    concat!("control ", stringify!($subcommand),
+                    " missing argument `", stringify!($var),"'"
+                    )
+                    )?;
+                let (var, newins) = make_not_string(ctx, var,
+                    // draw subcommand argument`var' cannot be a string
+                    concat!("control ", stringify!($subcommand)," argument `",
+                    stringify!($var),"' cannot be a string")
+                    )?;
+                ins.extend(newins);
+                var
+            };
+        };
+        ($subcommand:ident, $var:ident, $($vars:ident),+) => {
+            notstr!($subcommand, $var);
+            notstr!($subcommand, $($vars),+);
+        };
+    }
+
+    let subcommand = match *subcmd {
         "enabled" => {
-            const C: &str = "control subcommand `enabled'";
-
-            if args.len() != 3 {
-                return Err(format!("{} expects one argument", C));
-            }
-
-            let (enabled, instr) = make_not_string(ctx, &args[2], &format!("{} `enabled' argument cannot be a string", C))?;
-            ins.extend(instr);
+            notstr!(enabled, enabled);
             ControlSI::Enabled(enabled)
         },
         "shoot" => {
-            const C: &str = "control subcommand `shoot'";
-
-            if args.len() != 5 {
-                return Err(format!("{} expects three arguments", C));
-            }
-
-            let (x, instr) = make_not_string(ctx, &args[2], &format!("{} `x' argument cannot be a string", C))?;
-            ins.extend(instr);
-            let (y, instr) = make_not_string(ctx, &args[3], &format!("{} `y' argument cannot be a string", C))?;
-            ins.extend(instr);
-            let (shoot, instr) = make_not_string(ctx, &args[4], &format!("{} `shoot' argument cannot be a string", C))?;
-            ins.extend(instr);
-
+            notstr!(shoot, x, y, shoot);
             ControlSI::Shoot { x, y, shoot }
         },
         "shootp" => {
-            const C: &str = "control subcommand `shootp'";
-
-            if args.len() != 4 {
-                return Err(format!("{} expects two arguments", C));
-            }
-
-            let (unit, instr) = make_not_string(ctx, &args[2], &format!("{} `x' argument cannot be a string", C))?;
-            ins.extend(instr);
-            let (shoot, instr) = make_not_string(ctx, &args[3], &format!("{} `y' argument cannot be a string", C))?;
-            ins.extend(instr);
+            let unit = argi.next().ok_or("control shootp missing argument `unit'")?;
+            let unit = make_variable(
+                expect_identifier(unit, "control shootp argument `unit' must be an identifier")?);
+            notstr!(shootp, shoot);
 
             ControlSI::Shootp { unit, shoot }
         },
         "configure" => {
-            const C: &str = "control subcommand `configure'";
-
-            if args.len() != 3 {
-                return Err(format!("{} expects one argument", C));
-            }
-
-            let (configuration, instr) =
-                make_not_string(
-                    ctx,
-                    &args[2],
-                    &format!("{} `configuration' argument cannot be a string", C)
-                )?;
-            ins.extend(instr);
+            let configuration = argi.next().ok_or("control configure missing argument `configuration'")?;
+            let configuration = make_variable(
+                expect_identifier(
+                    configuration,
+                    "control configure argument `configuration' must be an identifier")?
+                );
 
             ControlSI::Configure(configuration)
         },
         "color" => {
-            const C: &str = "control subcommand `shoot'";
-
-            if args.len() != 5 {
-                return Err(format!("{} expects three arguments", C));
-            }
-
-            let (r, instr) = make_not_string(ctx, &args[2], &format!("{} `r' argument cannot be a string", C))?;
-            ins.extend(instr);
-            let (g, instr) = make_not_string(ctx, &args[3], &format!("{} `g' argument cannot be a string", C))?;
-            ins.extend(instr);
-            let (b, instr) = make_not_string(ctx, &args[4], &format!("{} `b' argument cannot be a string", C))?;
-            ins.extend(instr);
-
+            notstr!(color, r, g, b);
             ControlSI::Color{ r, g, b }
         },
         invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
     };
+
+    if argi.len() > 0 {
+        return Err(format!("Extra arguments to control subcommand `{}'", *subcmd));
+    }
 
     ins.push(Ins::Control{ target, subcommand });
     Ok(ins)
@@ -889,7 +877,7 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 let var = argi.next().ok_or(
                     // draw subcommand missing `var'
                     concat!("draw ", stringify!($subcommand),
-                    " missing `", stringify!($var),"'"
+                    " missing argument `", stringify!($var),"'"
                     )
                     )?;
                 let (var, newins) = make_not_string(ctx, var,
