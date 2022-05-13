@@ -30,7 +30,7 @@ The translator is missing about half of the processor instructions, but those
 are not very difficult to add at all, just doing them one by one as needed
 
 * [ ] Proper parser errors
-* [ ] All processor instructions
+* [x] All processor instructions
 * [ ] Documentation
 * [ ] Optimisations
 * [ ] Virtual processor

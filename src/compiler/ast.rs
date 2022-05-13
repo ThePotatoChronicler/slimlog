@@ -15,9 +15,3 @@ pub enum Argument<'a> {
     String(Span<'a>),
     Statement(Statement<'a>)
 }
-
-impl<'a> Argument<'a> {
-    pub fn is_statement(&self) -> bool {
-        matches!(self, Argument::Statement(_))
-    }
-}

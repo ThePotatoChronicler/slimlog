@@ -172,7 +172,8 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                             format!("draw image {x} {y} {image} {size} {rotation}")
                         }
                     }
-                }
+                },
+                DrawFlush(display) => format!("drawflush {}", disp!(display)),
                 End => "end".into(),
                 Label(_) => {
                     // Adds an `end` instruction at the end of the output if there isn't
@@ -196,6 +197,7 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     let linenum = labels[label];
                     format!("jump {linenum} {cmpstr} {left} {right}")
                 },
+                Noop => "noop".into(),
                 Print(arg) => format!("print {}", disp!(arg)),
                 PrintFlush(building) => {
                     format!("printflush {}", disp!(building))
@@ -210,6 +212,10 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     let [cond1, cond2, cond3] = conds;
                     format!("radar {cond1} {cond2} {cond3} {sort} {from} {order} {ret}")
                 },
+                Read { result, cell, at } => {
+                    disp!([result, cell, at]);
+                    format!("read {result} {cell} {at}")
+                }
                 Sensor { result: ret, target, sensable } => {
                     disp!([ret, target, sensable]);
                     format!("sensor {ret} {target} {sensable}")
@@ -292,8 +298,14 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     let [cond1, cond2, cond3] = conds;
                     format!("uradar {cond1} {cond2} {cond3} {sort} 0 {order} {ret}")
                 },
+                Write { value, to, at } => {
+                    disp!([value, to, at]);
+                    format!("write {value} {to} {at}")
+                },
                 _Raw(s) => s.clone(),
+                /* Never thought I'd see the day this line would be unnecesarry
                 instruction => return Err(format!("Instruction {:?} not yet implemented for translation", instruction)),
+                */
             }
         )
     }
@@ -320,29 +332,30 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
         // We need two instructions
         if it != ins.len() - 1 {
 
-            // Combines two set operations if the result of first
-            // is the value of the second, and they're temporary variables
             if let Some(new_instruction) = combine_set_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
                 continue;
             }
 
-            // Combines operations and jumps if possible
+            if let Some(new_instruction) = combine_read_and_set(&ins[it], &ins[it + 1]) {
+                res.push(new_instruction);
+                it += 2;
+                continue;
+            }
+
             if let Some(new_instruction) = combine_op_and_jump(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
                 continue;
             }
 
-            // Combines radar and set if possible
             if let Some(new_instruction) = combine_radar_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
                 continue;
             }
 
-            // Combines op and set
             if let Some(new_instruction) = combine_op_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
@@ -391,13 +404,14 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
         "control" => ins.extend(control_function(newctx)?),
         "do" => ins.extend(do_function(newctx)?),
         "draw" => ins.extend(draw_function(newctx)?),
+        "drawflush" => ins.push(drawflush_function(newctx)?),
+        "end" => ins.push(end_function(newctx)?),
         "getlink" => ins.extend(getlink_function(newctx)?),
         "if" => ins.extend(if_function(newctx)?),
         "iterlinks" => ins.extend(iterlinks_function(newctx)?),
+        "noop" => ins.push(noop_function(newctx)?),
         "printflush" => ins.push(printflush_function(newctx)?),
         "radar" => ins.extend(radar_function(newctx)?),
-        "set" => ins.extend(set_function(newctx)?),
-        "sensor" => ins.push(sensor_function(newctx)?),
         "print" => {
             let (mut i, [a]) = generic_passthrough::<1>("print", newctx)?;
             i.push(Ins::Print(a));
@@ -409,10 +423,15 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             i.push(Ins::Print(newline()));
             ins.extend(i);
         },
+        "read" => ins.extend(read_function(newctx)?),
+        "set" => ins.extend(set_function(newctx)?),
+        "sensor" => ins.push(sensor_function(newctx)?),
+        "sleep" => ins.extend(sleep_function(newctx)?),
         "ucontrol" => ins.extend(ucontrol_function(newctx)?),
         "ulocate" => ins.extend(ulocate_function(newctx)?),
         "uradar" => ins.extend(uradar_function(newctx)?),
         "while" => ins.extend(while_function(newctx)?),
+        "write" => ins.extend(write_function(newctx)?),
         "_raw" => ins.push(raw_function(newctx)?),
         _ => matched = false,
     };
@@ -1270,5 +1289,133 @@ fn ucontrol_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     ins.push(Ins::UnitControl(subcmd));
+    Ok(ins)
+}
+
+fn read_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, ret, .. } = ctx;
+    let mut argi = args.iter();
+    let mut ins = Vec::new();
+
+    let cell = argi.next().ok_or("read missing argument `cell'")?;
+    let cell = make_variable(expect_identifier(cell, "read argument `cell' must be an identifier")?);
+
+    let at = argi.next().ok_or("read missing argument `at'")?;
+    let (at, newins) = make_not_string(ctx, at, "read argument `at' cannot be a string")?;
+    ins.extend(newins);
+
+    if argi.len() > 0 {
+        return Err(
+            format!("{} extra argument{} to read",
+                argi.len(), if argi.len() > 1 { "s" } else { "" })
+            );
+    }
+
+    ins.push(Ins::Read { at, cell, result: ret_or_null(ret) });
+
+    Ok(ins)
+}
+
+fn write_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, ret, .. } = ctx;
+    let mut argi = args.iter();
+    let mut ins = Vec::new();
+
+    let to = argi.next().ok_or("read missing argument `to'")?;
+    let to = make_variable(expect_identifier(to, "write argument `to' must be an identifier")?);
+
+    let at = argi.next().ok_or("read missing argument `at'")?;
+    let (at, newins) = make_not_string(ctx, at, "write argument `at' cannot be a string")?;
+    ins.extend(newins);
+
+    let value = argi.next().ok_or("read missing argument `value'")?;
+    let (value, newins) = make_not_string(ctx, value, "write argument `value' cannot be a string")?;
+    ins.extend(newins);
+
+    if argi.len() > 0 {
+        return Err(
+            format!("{} extra argument{} to write",
+                argi.len(), if argi.len() > 1 { "s" } else { "" })
+            );
+    }
+
+    ins.push(Ins::Write { to, at, value: value.clone() });
+    ins.push(Ins::Set { variable: ret_or_null(ret), value });
+
+    Ok(ins)
+}
+
+fn end_function(ctx: Ctx) -> Result<Ins, String> {
+    let Ctx { args, .. } = ctx;
+
+    if !args.is_empty() {
+        return Err("end function accepts no arguments".into());
+    }
+
+    Ok(Ins::End)
+}
+
+fn noop_function(ctx: Ctx) -> Result<Ins, String> {
+    let Ctx { args, .. } = ctx;
+
+    if !args.is_empty() {
+        return Err("noop function accepts no arguments".into());
+    }
+
+    Ok(Ins::Noop)
+}
+
+fn drawflush_function(ctx: Ctx) -> Result<Ins, String> {
+    let args = ctx.args;
+    if args.len() != 1 {
+        return Err("drawflush function accepts exactly one argument".into())
+    }
+
+    let display = expect_identifier(&args[0], "drawflush argument must be an identifier")?;
+    Ok(Ins::DrawFlush(make_variable(display)))
+}
+
+fn sleep_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    let Ctx { args, .. } = ctx;
+
+    if args.len() != 1 {
+        return Err("sleep function accepts exactly one argument".into());
+    }
+
+    let mut ins = Vec::with_capacity(5);
+
+    let (duration, newins) = make_not_string(ctx, &args[0], "sleep argument `duration' cannot be a string")?;
+    let additional_time: u16 = newins.iter().fold(0, |a, i| a.saturating_add(i.size().try_into().unwrap()));
+    ins.extend(newins);
+
+    let end_time = generate_variable(ctx);
+    ins.push(Ins::Op {
+        op: Operation::Mult,
+        result: end_time.clone(),
+        left: make_num(1000),
+        right: duration,
+    });
+    ins.push(Ins::Op {
+        op: Operation::Plus,
+        result: end_time.clone(),
+        left: str_to_var("@time"),
+        right: end_time.clone(),
+    });
+    ins.push(Ins::Op {
+        op: Operation::Minus,
+        result: end_time.clone(),
+        left: end_time.clone(),
+        right: make_num::<u16>(3 + additional_time),
+    });
+
+    let repeat_label = generate_label(ctx);
+    ins.push(Ins::Label(repeat_label));
+    ins.push(Ins::Jump {
+        cmp: Comparison::LessThan,
+        label: repeat_label,
+        left: str_to_var("@time"),
+        right: end_time,
+    });
+
     Ok(ins)
 }

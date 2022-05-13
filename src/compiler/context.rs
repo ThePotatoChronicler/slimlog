@@ -66,11 +66,6 @@ impl<'a, 'r, 's> Ctx<'a, 'r, 's> {
         ctx
     }
 
-    /// Returns the same context but with no `args`
-    pub fn no_args(&self) -> Self {
-        self.with_args(&[])
-    }
-
     pub fn get_next(&self) -> usize {
         let current = self.seq.get();
         self.seq.set(current + 1);

@@ -1,0 +1,8 @@
+( do
+	(sleep 1)
+	(draw clear 0 0 0)
+	(drawflush display1)
+	(sleep 1)
+	(draw clear 255 255 255)
+	(drawflush display1)
+)

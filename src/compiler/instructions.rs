@@ -32,9 +32,17 @@ type Label = usize;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ins {
     /// read store cell address
-    Read([Arg; 3]),
+    Read {
+        result: Arg,
+        cell: Arg,
+        at: Arg,
+    },
     /// write value, cell, address
-    Write([Arg; 3]),
+    Write {
+        value: Arg,
+        to: Arg,
+        at: Arg,
+    },
     /// draw subcommand ...
     Draw(DrawSI),
     /// print text
@@ -516,7 +524,6 @@ impl TryFrom<Comparison> for Operation {
 }
 
 impl Ins {
-
     /// Returns an instruction's size in lines
     pub fn size(&self) -> usize {
         use Ins::*;
@@ -524,12 +531,6 @@ impl Ins {
             Label(_) => 0,
             _ => 1
         }
-    }
-
-    /// Compares two instructions solely based on variant
-    pub fn cmp(&self, other: &Self) -> bool {
-        use std::mem::discriminant;
-        discriminant(self) == discriminant(other)
     }
 }
 
@@ -550,26 +551,6 @@ impl From<Comparison> for &'static str {
 }
 
 impl Arg {
-
-    /// Compares Argument based on Arg and Type
-    pub fn cmp(&self, other: &Self) -> bool {
-        use std::mem::discriminant;
-        match self {
-            Arg::Variable(_) => discriminant(self) == discriminant(other),
-            Arg::Literal(stype) => {
-                match other {
-                    Arg::Variable(_) => false,
-                    Arg::Literal(otype) => {
-                        stype.cmp(otype)
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn is_var(&self) -> bool {
-        matches!(self, Arg::Variable(_))
-    }
 
     /// Displays an Arg
     pub fn display<'a, 't>(
@@ -617,15 +598,6 @@ impl Arg {
                 }
             }
         }
-    }
-}
-
-impl Type {
-
-    /// Compares Type based on enum variant
-    pub fn cmp(&self, other: &Self) -> bool {
-        use std::mem::discriminant;
-        discriminant(self) == discriminant(other)
     }
 }
 

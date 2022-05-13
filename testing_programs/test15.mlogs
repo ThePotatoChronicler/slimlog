@@ -1,0 +1,10 @@
+( do
+	(set i 0)
+	(while (< i 64) (do
+		(set val (read cell1 i))
+		(set val (write cell1 i (+ val 1)))
+		(print val)
+		(set i (+ i 1))
+	))
+	(printflush message1)
+)

@@ -11,6 +11,18 @@ use super::{
     },
 };
 
+macro_rules! clones {
+    ($var:ident) => {
+        let $var = $var.clone();
+    };
+    ($var:ident, $($vars:ident),+) => {
+        clones!($var);
+        clones!($($vars),+);
+    }
+}
+
+/// Combines two set operations if the result of first
+/// is the value of the second, and they're temporary variables
 pub(crate) fn combine_set_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
         ( Ins::Set { variable: Arg::Variable(Vartype::Unnamed(var1)), value: val1 },
@@ -104,8 +116,8 @@ pub(crate) fn combine_op_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
 
 pub(crate) fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
-        ( Ins::Radar { result: Arg::Variable(resvar), .. },
-          Ins::Set { variable, value: Arg::Variable(setvalue) }) => {
+        ( Ins::Radar { result: Arg::Variable(Vartype::Unnamed(resvar)), .. },
+          Ins::Set { variable, value: Arg::Variable(Vartype::Unnamed(setvalue)) }) => {
             if resvar == setvalue {
                 let mut new_ins: Ins = ins1.clone();
                 match new_ins {
@@ -118,4 +130,18 @@ pub(crate) fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
         _ => return None
     };
     None
+}
+
+pub(crate) fn combine_read_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
+    match (ins1, ins2) {
+        ( Ins::Read { result: Arg::Variable(Vartype::Unnamed(result)), cell, at },
+          Ins::Set { variable, value: Arg::Variable(Vartype::Unnamed(setvalue)) }) => {
+            if result != setvalue {
+                return None;
+            }
+            clones!(variable, cell, at);
+            Some(Ins::Read { result: variable, cell, at})
+        },
+        _ => None
+    }
 }
