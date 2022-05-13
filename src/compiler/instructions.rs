@@ -706,19 +706,6 @@ impl From<Vartype> for Arg {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn type_cmp() {
-        use crate::compiler::instructions::{
-            Arg::*, Type::*, Vartype
-        };
-        assert!(Literal(Num(5.0)).cmp(&Literal(Num(10.0))));
-        assert!(Literal(Str("Pain".into())).cmp(&Literal(Str("Suffering".into()))));
-        assert!(Variable(Vartype::Named("Pain".into())).cmp(&Variable(Vartype::Named("Suffering".into()))));
-    }
-}
-
 impl FromStr for BuildingGroup {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
