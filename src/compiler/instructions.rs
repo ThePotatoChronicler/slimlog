@@ -99,7 +99,12 @@ pub enum Ins {
         conds: [TargetProp; 3]
     },
     /// ulocate subcommand ...
-    UnitLocate(UnitLocateSI),
+    UnitLocate {
+        outx: Arg,
+        outy: Arg,
+        found: Arg,
+        subcommand: UnitLocateSI
+    },
     /// noop
     Noop,
 
@@ -308,10 +313,14 @@ pub enum UnitControlSI {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnitLocateSI {
-    Ore([Arg; 4]),
-    Building(BuildingGroup, [Arg; 5]),
-    Spawn([Arg; 4]),
-    Damaged([Arg; 4])
+    Ore(Arg), // Argument
+    Building {
+        group: BuildingGroup,
+        enemy: Arg,
+        building: Arg,
+    },
+    Spawn(Arg), // Return
+    Damaged(Arg), // Return
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -325,7 +334,7 @@ pub enum BuildingGroup {
     Rally,
     Battery,
     Resupply,
-    Reactor
+    Reactor,
 }
 
 /// Panics when fails, for non-panicking version, check out TryFrom<Operation> for String
@@ -695,5 +704,43 @@ mod tests {
         assert!(Literal(Num(5.0)).cmp(&Literal(Num(10.0))));
         assert!(Literal(Str("Pain".into())).cmp(&Literal(Str("Suffering".into()))));
         assert!(Variable(Vartype::Named("Pain".into())).cmp(&Variable(Vartype::Named("Suffering".into()))));
+    }
+}
+
+impl FromStr for BuildingGroup {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use BuildingGroup::*;
+        Ok(match s {
+            "core" => Core,
+            "storage" => Storage,
+            "generator" => Generator,
+            "turret" => Turret,
+            "factory" => Factory,
+            "repair" => Repair,
+            "rally" => Rally,
+            "battery" => Battery,
+            "resupply" => Resupply,
+            "reactor" => Reactor,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl From<BuildingGroup> for &'static str {
+    fn from(group: BuildingGroup) -> Self {
+        use BuildingGroup::*;
+        match group {
+            Core => "core",
+            Storage => "storage",
+            Generator => "generator",
+            Turret => "turret",
+            Factory => "factory",
+            Repair => "repair",
+            Rally => "rally",
+            Battery => "battery",
+            Resupply => "resupply",
+            Reactor => "reactor",
+        }
     }
 }

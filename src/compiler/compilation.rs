@@ -219,6 +219,20 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     format!("set {variable} {value}")
                 },
                 UnitBind(unit) => format!("ubind {}", disp!(unit)),
+                UnitLocate { found, outx, outy, subcommand } => {
+                    use instructions::UnitLocateSI::*;
+                    disp!([found, outx, outy]);
+                    match subcommand {
+                        Ore(ore) => format!("ulocate ore core null {} {outx} {outy} {found}", disp!(ore)),
+                        Spawn(spawn) => format!("ulocate spawn core null null {outx} {outy} {found} {}", disp!(spawn)),
+                        Damaged(damaged) => format!("ulocate damaged core null null {outx} {outy} {found} {}", disp!(damaged)),
+                        Building { group, enemy, building } => {
+                            disp!([enemy, building]);
+                            let group: &'static str = (*group).into();
+                            format!("ulocate building {group} {enemy} null {outx} {outy} {found} {building}")
+                        }
+                    }
+                }
                 UnitRadar { order, result: ret, sort, conds } => {
                     disp!([order, ret]);
                     let [cond1, cond2, cond3] = conds;
@@ -341,6 +355,7 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             i.push(Ins::Print(newline()));
             ins.extend(i);
         },
+        "ulocate" => ins.extend(ulocate_function(newctx)?),
         "uradar" => ins.extend(uradar_function(newctx)?),
         "while" => ins.extend(while_function(newctx)?),
         "_raw" => ins.push(raw_function(newctx)?),
@@ -547,7 +562,7 @@ fn printflush_function(ctx: Ctx) -> Result<Ins, String> {
     if let Argument::Identifier(ident) = &args[0] {
         Ok(Ins::PrintFlush(make_variable(ident)))
     } else {
-        Err("printflush argument must be a variable".into())
+        Err("printflush argument must be an identifier".into())
     }
 }
 
@@ -643,7 +658,10 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     };
 
     if argi.len() > 0 {
-        return Err(format!("Extra arguments to control subcommand `{}'", *subcmd));
+        return Err(
+            format!("{} extra argument{} to control subcommand `{}'",
+                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcmd)
+            );
     }
 
     ins.push(Ins::Control{ target, subcommand });
@@ -895,7 +913,7 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         };
     }
 
-    let subcommand = argi.next().ok_or("Draw function missing subcommand")?;
+    let subcommand = argi.next().ok_or("draw function missing subcommand")?;
     let subcommand = expect_identifier(subcommand, "draw subcommand must be an identifier")?;
     let si: DrawSI = match *subcommand {
         "clear" => {
@@ -939,7 +957,7 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let image = argi.next().ok_or("draw image missing argument `image'")?;
             let image = expect_identifier(image, "draw image argument `image' must be an identifier")?;
             if !image.starts_with('@') {
-                warn!("draw image argument `image' should probably begin with a @");
+                warn!("draw image argument `image' should probably begin with an @");
             }
             let image = make_variable(image);
             notstr!(image, size, rotation);
@@ -949,10 +967,83 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     };
 
     if argi.len() > 0 {
-        return Err(format!("Extra arguments to draw subcommand `{}'", *subcommand));
+        return Err(
+            format!("{} extra argument{} to control subcommand `{}'",
+                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
+            );
     }
 
     ins.push(Ins::Draw(si));
 
+    Ok(ins)
+}
+
+fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::UnitLocateSI;
+    let Ctx { args, ret, .. } = ctx;
+    let mut argi = args.iter();
+
+    let mut ins = Vec::new();
+
+    let subcommand = argi.next().ok_or("ulocate function missing subcommand")?;
+    let subcommand = expect_identifier(subcommand, "ulocate subcommand must be an identifier")?;
+
+    let outx = argi.next().ok_or(format!("ulocate {} missing argument `outx'", *subcommand))?;
+    let outx = expect_identifier(outx, &format!("ulocate {} argument `outx' must be an identifier", *subcommand))?;
+    let outx = make_variable(outx);
+    let outy = argi.next().ok_or(format!("ulocate  {} missing argument `outy'", *subcommand))?;
+    let outy = expect_identifier(outy, &format!("ulocate {} argument `outy' must be an identifier", *subcommand))?;
+    let outy = make_variable(outy);
+
+    let subcmd: UnitLocateSI = match *subcommand {
+        "ore" => {
+            let ore = argi.next().ok_or("ulocate ore missing argument `ore'")?;
+            let ore = expect_identifier(ore, "ulocate ore argument `ore' must be an identifier")?;
+            if !ore.starts_with('@') {
+                warn!("ulocate ore argument `ore' should probably begin with an @");
+            }
+            let ore = make_variable(ore);
+
+            UnitLocateSI::Ore(ore)
+        },
+        "spawn" => {
+            let spawn = argi.next().ok_or("ulocate spawn missing argument `spawn'")?;
+            let spawn = expect_identifier(spawn, "ulocate spawn argument `spawn' must be an identifier")?;
+            let spawn = make_variable(spawn);
+            UnitLocateSI::Spawn(spawn)
+        },
+        "damaged" => {
+            let damaged = argi.next().ok_or("ulocate damaged missing argument `damaged'")?;
+            let damaged = expect_identifier(damaged, "ulocate damaged argument `damaged' must be an identifier")?;
+            let damaged = make_variable(damaged);
+
+            UnitLocateSI::Damaged(damaged)
+        },
+        "building" => {
+            let group = argi.next().ok_or("ulocate building missing argument `group'")?;
+            let group = expect_identifier(group, "ulocate building argument `group' must be an identifier")?;
+            let group = group.parse().map_err(|_| "ulocate building argument `group' isn't a valid building group")?;
+
+            let enemy = argi.next().ok_or("ulocate building missing argument `enemy'")?;
+            let (enemy, newins) = make_not_string(ctx, enemy, "ulocate building argument `enemy' cannot be a string")?;
+            ins.extend(newins);
+
+            let building = argi.next().ok_or("ulocate building missing argument `building'")?;
+            let building = expect_identifier(building, "ulocate building argument `building' must be an identifier")?;
+            let building = make_variable(building);
+
+            UnitLocateSI::Building { group, enemy, building }
+        },
+        invalid => return Err(format!("Unknown ulocate subcommand `{}'", invalid)),
+    };
+
+    if argi.len() > 0 {
+        return Err(
+            format!("{} extra argument{} to ulocate subcommand `{}'",
+                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
+            );
+    }
+
+    ins.push(Ins::UnitLocate { outx, outy, found: ret_or_null(ret), subcommand: subcmd });
     Ok(ins)
 }

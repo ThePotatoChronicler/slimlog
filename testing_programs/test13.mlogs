@@ -1,0 +1,6 @@
+( do
+	(ulocate ore outx outy @copper)
+	(ulocate spawn outx outy spawn)
+	(ulocate damaged outx outy damaged)
+	(ulocate building outx outy core (+ 1 0) building)
+)
