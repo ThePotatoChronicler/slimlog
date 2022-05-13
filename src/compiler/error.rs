@@ -40,7 +40,7 @@ impl<'a> From<nom::Err<nom::error::Error<Span<'a>>>> for ParserError<'a> {
     fn from(err: nom::Err<nom::error::Error<Span<'a>>>) -> Self {
         match err {
             nom::Err::Error(error) | nom::Err::Failure(error) => error.into(),
-            nom::Err::Incomplete(needed) => Self {
+            nom::Err::Incomplete(_needed) => Self {
                 message: format!("{}", err),
                 span: None
             }

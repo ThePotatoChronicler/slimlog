@@ -294,21 +294,61 @@ pub enum Comparison {
 pub enum UnitControlSI {
     Idle,
     Stop,
-    Move([Arg; 2]),
-    Approach([Arg; 3]),
+    Move {
+        x: Arg,
+        y: Arg,
+    },
+    Approach {
+        x: Arg,
+        y: Arg,
+        radius: Arg,
+    },
     Boost(Arg),
     Pathfind,
-    Target([Arg; 3]),
-    Targetp([Arg; 2]),
-    ItemDrop([Arg; 2]),
-    ItemTake([Arg; 3]),
+    Target {
+        x: Arg,
+        y: Arg,
+        shoot: Arg,
+    },
+    Targetp {
+        unit: Arg,
+        shoot: Arg,
+    },
+    ItemDrop {
+        to: Arg,
+        amount: Arg,
+    },
+    ItemTake {
+        from: Arg,
+        item: Arg,
+        amount: Arg,
+    },
     PayDrop,
     PayTake(Arg),
-    Mine([Arg; 2]),
+    Mine {
+        x: Arg,
+        y: Arg,
+    },
     Flag(Arg),
-    Build([Arg; 5]),
-    GetBlock([Arg; 4]),
-    Within([Arg; 4])
+    Build {
+        x: Arg,
+        y: Arg,
+        block: Arg,
+        rotation: Arg,
+        config: Arg,
+    },
+    GetBlock {
+        x: Arg,
+        y: Arg,
+        building_type: Arg,
+        building: Arg,
+    },
+    Within {
+        x: Arg,
+        y: Arg,
+        radius: Arg,
+        result: Arg,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

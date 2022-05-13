@@ -219,6 +219,60 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
                     format!("set {variable} {value}")
                 },
                 UnitBind(unit) => format!("ubind {}", disp!(unit)),
+                UnitControl(subcmd) => {
+                    use instructions::UnitControlSI::*;
+                    match subcmd {
+                        Idle => "ucontrol idle".into(),
+                        Stop => "ucontrol stop".into(),
+                        Move { x, y } => {
+                            disp!([x, y]);
+                            format!("ucontrol move {x} {y}")
+                        },
+                        Approach { x, y, radius } => {
+                            disp!([x, y, radius]);
+                            format!("ucontrol approach {x} {y} {radius}")
+                        },
+                        Boost(boost) => {
+                            format!("ucontrol boost {}", disp!(boost))
+                        },
+                        Pathfind => "ucontrol pathfind".into(),
+                        Target { x, y, shoot } => {
+                            disp!([x, y, shoot]);
+                            format!("ucontrol target {x} {y} {shoot}")
+                        },
+                        Targetp { unit, shoot } => {
+                            disp!([unit, shoot]);
+                            format!("ucontrol targetp {unit} {shoot}")
+                        },
+                        ItemDrop { to, amount } => {
+                            disp!([to, amount]);
+                            format!("ucontrol itemDrop {to} {amount}")
+                        },
+                        ItemTake { from, item, amount } => {
+                            disp!([from, item, amount]);
+                            format!("ucontrol itemTake {from} {item} {amount}")
+                        },
+                        PayDrop => "ucontrol payDrop".into(),
+                        PayTake(takeunits) => format!("ucontrol payTake {}", disp!(takeunits)),
+                        Mine { x, y } => {
+                            disp!([x, y]);
+                            format!("ucontrol mine {x} {y}")
+                        },
+                        Flag(value) => format!("ucontrol flag {}", disp!(value)),
+                        Build { x, y, block, rotation, config } => {
+                            disp!([x, y, block, rotation, config]);
+                            format!("ucontrol build {x} {y} {block} {rotation} {config}")
+                        },
+                        GetBlock { x, y, building_type, building } => {
+                            disp!([x, y, building_type, building]);
+                            format!("ucontrol getBlock {x} {y} {building_type} {building}")
+                        },
+                        Within { x, y, radius, result } => {
+                            disp!([x, y, radius, result]);
+                            format!("ucontrol within {x} {y} {radius} {result}")
+                        }
+                    }
+                }
                 UnitLocate { found, outx, outy, subcommand } => {
                     use instructions::UnitLocateSI::*;
                     disp!([found, outx, outy]);
@@ -355,6 +409,7 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             i.push(Ins::Print(newline()));
             ins.extend(i);
         },
+        "ucontrol" => ins.extend(ucontrol_function(newctx)?),
         "ulocate" => ins.extend(ulocate_function(newctx)?),
         "uradar" => ins.extend(uradar_function(newctx)?),
         "while" => ins.extend(while_function(newctx)?),
@@ -392,7 +447,7 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 }
 
 fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
-    let args = ctx.args;
+    let Ctx { args, .. } = ctx;
     let mut ins = Vec::new();
     for arg in args {
         if let Argument::Statement(stmnt) = arg {
@@ -1034,7 +1089,7 @@ fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
             UnitLocateSI::Building { group, enemy, building }
         },
-        invalid => return Err(format!("Unknown ulocate subcommand `{}'", invalid)),
+        invalid => return Err(format!("Unknown ulocate subcommand `{invalid}'")),
     };
 
     if argi.len() > 0 {
@@ -1045,5 +1100,175 @@ fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     ins.push(Ins::UnitLocate { outx, outy, found: ret_or_null(ret), subcommand: subcmd });
+    Ok(ins)
+}
+
+fn ucontrol_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
+    use instructions::UnitControlSI;
+    let Ctx { args, .. } = ctx;
+    let mut argi = args.iter();
+
+    let mut ins = Vec::new();
+    let subcommand = argi.next().ok_or("ulocate function missing subcommand")?;
+    let subcommand = expect_identifier(subcommand, "ulocate subcommand must be an identifier")?;
+
+    // Utility macros
+    macro_rules! notstr {
+        ($subcommand:ident, $var:ident) => {
+            let $var = {
+                let var = argi.next().ok_or(
+                    // draw subcommand missing `var'
+                    concat!("ucontrol ", stringify!($subcommand),
+                    " missing argument `", stringify!($var),"'"
+                    )
+                    )?;
+                let (var, newins) = make_not_string(ctx, var,
+                    // draw subcommand argument`var' cannot be a string
+                    concat!("draw ", stringify!($subcommand)," argument `",
+                    stringify!($var),"' cannot be a string")
+                    )?;
+                ins.extend(newins);
+                var
+            };
+        };
+        ($subcommand:ident, $var:ident, $($vars:ident),+) => {
+            notstr!($subcommand, $var);
+            notstr!($subcommand, $($vars),+);
+        };
+    }
+
+    macro_rules! ident {
+        ($subcommand:ident, $var:ident) => {
+            let $var = {
+                let next = argi.next().ok_or(
+                    concat!(
+                        "draw ", stringify!($subcommand),
+                        " missing argument `", stringify!($var), "'"
+                    )
+                )?;
+                make_variable(
+                    expect_identifier(next,
+                        concat!(
+                            "draw ", stringify!($subcommand),
+                            " argument `", stringify!($var), "' must be an identifier"
+                        )
+                    )?
+                )
+            };
+        };
+        ($subcommand:ident, $var:ident, $($vars:ident),+) => {
+            ident!($subcommand, $var);
+            ident!($subcommand, $($vars),+);
+        };
+    }
+
+    macro_rules! atident {
+        ($subcommand:ident, $var:ident) => {
+            let $var = {
+                let next = argi.next().ok_or(
+                    concat!(
+                        "draw ", stringify!($subcommand),
+                        " missing argument `", stringify!($var), "'"
+                    )
+                )?;
+                let ident = expect_identifier(next,
+                    concat!(
+                        "draw ", stringify!($subcommand),
+                        " argument `", stringify!($var), "' must be an identifier"
+                        )
+                    )?;
+                if !ident.starts_with('@') {
+                    log::warn!(concat!(
+                        "draw ", stringify!($subcommand),
+                        " argument `", stringify!($var), "' should probably start with an @"
+                    ))
+                }
+                make_variable(ident)
+            };
+        };
+        ($subcommand:ident, $var:ident, $($vars:ident),+) => {
+            atident!($subcommand, $var);
+            atident!($subcommand, $($vars),+);
+        };
+    }
+
+    let subcmd: UnitControlSI = match *subcommand {
+        "idle" => UnitControlSI::Idle,
+        "stop" => UnitControlSI::Stop,
+        "move" => {
+            // Lets hope this won't blow up T_T
+            notstr!(move, x, y);
+            UnitControlSI::Move { x, y }
+        },
+        "approach" => {
+            notstr!(approach, x, y, radius);
+            UnitControlSI::Approach { x, y, radius }
+        },
+        "boost" => {
+            notstr!(boost, enable);
+            UnitControlSI::Boost(enable)
+        },
+        "pathfind" => UnitControlSI::Pathfind,
+        "target" => {
+            notstr!(target, x, y, shoot);
+            UnitControlSI::Target { x, y, shoot }
+        },
+        "targetp" => {
+            ident!(targetp, unit);
+            notstr!(targetp, shoot);
+            UnitControlSI::Targetp { unit, shoot }
+        },
+        "itemdrop" => {
+            ident!(itemdrop, to);
+            notstr!(itemdrop, amount);
+            UnitControlSI::ItemDrop { to, amount }
+        },
+        "itemtake" => {
+            ident!(itemtake, from);
+            atident!(itetake, item);
+            notstr!(itemtake, amount);
+            UnitControlSI::ItemTake { from, item, amount }
+        },
+        "paydrop" => UnitControlSI::PayDrop,
+        "paytake" => {
+            notstr!(paytake, takeunits);
+            UnitControlSI::PayTake(takeunits)
+        },
+        "mine" => {
+            notstr!(mine, x, y);
+            UnitControlSI::Mine { x, y }
+        },
+        "flag" => {
+            notstr!(flag, value);
+            UnitControlSI::Flag(value)
+        },
+        "build" => {
+            notstr!(build, x, y);
+            atident!(build, block);
+            notstr!(build, rotation);
+            ident!(build, config);
+            UnitControlSI::Build { x, y, block, rotation, config }
+        },
+        "getblock" => {
+            notstr!(getblock, x, y);
+            ident!(getblock, building_type, building);
+            UnitControlSI::GetBlock { x, y, building_type, building }
+        },
+        "within" => {
+            notstr!(within, x, y, radius);
+            ident!(within, result);
+            UnitControlSI::Within { x, y, radius, result }
+        },
+        invalid => return Err(format!("Unknown ucontrol subcommand `{invalid}'")),
+    };
+
+    if argi.len() > 0 {
+        return Err(
+            format!("{} extra argument{} to ucontrol subcommand `{}'",
+                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
+            );
+    }
+
+    ins.push(Ins::UnitControl(subcmd));
     Ok(ins)
 }
