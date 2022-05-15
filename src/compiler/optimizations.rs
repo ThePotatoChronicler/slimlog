@@ -132,6 +132,24 @@ pub(crate) fn combine_radar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     None
 }
 
+pub(crate) fn combine_uradar_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
+    match (ins1, ins2) {
+        ( Ins::UnitRadar { result: Arg::Variable(Vartype::Unnamed(resvar)), .. },
+          Ins::Set { variable, value: Arg::Variable(Vartype::Unnamed(setvalue)) }) => {
+            if resvar == setvalue {
+                let mut new_ins: Ins = ins1.clone();
+                match new_ins {
+                    Ins::UnitRadar { ref mut result, .. } => *result = variable.clone(),
+                    _ => unreachable!()
+                };
+                return Some(new_ins);
+            }
+        },
+        _ => return None
+    };
+    None
+}
+
 pub(crate) fn combine_read_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
     match (ins1, ins2) {
         ( Ins::Read { result: Arg::Variable(Vartype::Unnamed(result)), cell, at },

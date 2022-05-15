@@ -356,6 +356,12 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
                 continue;
             }
 
+            if let Some(new_instruction) = combine_uradar_and_set(&ins[it], &ins[it + 1]) {
+                res.push(new_instruction);
+                it += 2;
+                continue;
+            }
+
             if let Some(new_instruction) = combine_op_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
@@ -455,7 +461,7 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         return Err("set function accepts exactly two arguments".into());
     }
 
-    let ident = expect_identifier(&args[0], "first argument to set must be an identifier")?;
+    let ident = expect_identifier(&args[0], "set argument `variable' must be an identifier")?;
 
     let (value, mut ins) = make_generic(ctx, &args[1])?;
     let var = make_variable(ident);
@@ -470,12 +476,10 @@ fn do_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
     for arg in args {
         if let Argument::Statement(stmnt) = arg {
-            match compile_statement(stmnt, ctx.no_ret()) {
-                Ok(new_ins) => ins.extend(new_ins),
-                Err(err) => return Err(err)
-            }
+            let newins = compile_statement(stmnt, ctx.no_ret())?;
+            ins.extend(newins);
         } else {
-            return Err("do function only accepts statements as arguments".into())
+            return Err("do function only accepts statements as arguments".into());
         }
     }
     Ok(ins)
@@ -628,15 +632,14 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 }
 
 fn printflush_function(ctx: Ctx) -> Result<Ins, String> {
-    let args = ctx.args;
-    if args.len() != 1 {
-        return Err("printflush function accepts exactly one argument".into())
-    }
-
-    if let Argument::Identifier(ident) = &args[0] {
-        Ok(Ins::PrintFlush(make_variable(ident)))
-    } else {
-        Err("printflush argument must be an identifier".into())
+    let Ctx { args, .. } = ctx;
+    match args.len() {
+        0 => Ok(Ins::PrintFlush(str_to_var("message1"))),
+        1 => {
+            let message = expect_identifier(&args[0], "printflush argument `message' must be an identifier")?;
+            Ok(Ins::DrawFlush(make_variable(message)))
+        },
+        count => Err(format!("printflush accepts no arguments or one argument, not {count}"))
     }
 }
 
@@ -659,9 +662,6 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     use instructions::ControlSI;
     let Ctx { args, .. } = ctx;
-    if !matches!(args.len(), 2..=5) {
-        return Err("control accepts between 2 and 5 arguments".into())
-    }
 
     let mut ins = Vec::with_capacity(3);
     let mut argi = args.iter();
@@ -797,7 +797,7 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         }
 
         if args.len() >= 6 {
-            let ident = expect_identifier(&args[5], "The second condition argument to radar must be an identifier")?;
+            let ident = expect_identifier(&args[5], "The third condition argument to radar must be an identifier")?;
             conds[2] = ident.parse().map_err(|_| "Sixth argument to radar must be a valid condition")?;
         }
     }
@@ -833,27 +833,27 @@ fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut conds: [TargetProp; 3] = [TargetProp::Any, TargetProp::Any, TargetProp::Any];
 
     if !args.is_empty() {
-        let ident = expect_identifier(&args[1], "The `sort` argument to radar must be an identifier")?;
+        let ident = expect_identifier(&args[0], "The `sort` argument to radar must be an identifier")?;
         sort = ident.parse().map_err(|_| "First argument to radar must be a valid sort")?;
 
         if args.len() >= 2 {
-            let (neworder, newins) = make_not_string(ctx, &args[2], "Second argument to radar cannot be a string")?;
+            let (neworder, newins) = make_not_string(ctx, &args[1], "Second argument to radar cannot be a string")?;
             order = neworder;
             ins.extend(newins);
         }
 
         if args.len() >= 3 {
-            let ident = expect_identifier(&args[3], "The first condition argument to radar must be an identifier")?;
+            let ident = expect_identifier(&args[2], "The first condition argument to radar must be an identifier")?;
             conds[0] = ident.parse().map_err(|_| "Third argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 4 {
-            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
+            let ident = expect_identifier(&args[3], "The second condition argument to radar must be an identifier")?;
             conds[1] = ident.parse().map_err(|_| "Fourth argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 5 {
-            let ident = expect_identifier(&args[5], "The second condition argument to radar must be an identifier")?;
+            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
             conds[2] = ident.parse().map_err(|_| "Fifth argument to radar must be a valid condition")?;
         }
     }
@@ -999,8 +999,8 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             DrawSI::Color { r, g, b, a }
         },
         "stroke" => {
-            notstr!(stroke, w);
-            DrawSI::Stroke(w)
+            notstr!(stroke, stroke);
+            DrawSI::Stroke(stroke)
         },
         "line" => {
             notstr!(line, x1, y1, x2, y2);
@@ -1224,8 +1224,8 @@ fn ucontrol_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             UnitControlSI::Approach { x, y, radius }
         },
         "boost" => {
-            notstr!(boost, enable);
-            UnitControlSI::Boost(enable)
+            notstr!(boost, boost);
+            UnitControlSI::Boost(boost)
         },
         "pathfind" => UnitControlSI::Pathfind,
         "target" => {
@@ -1366,13 +1366,15 @@ fn noop_function(ctx: Ctx) -> Result<Ins, String> {
 }
 
 fn drawflush_function(ctx: Ctx) -> Result<Ins, String> {
-    let args = ctx.args;
-    if args.len() != 1 {
-        return Err("drawflush function accepts exactly one argument".into())
+    let Ctx { args, .. } = ctx;
+    match args.len() {
+        0 => Ok(Ins::DrawFlush(str_to_var("display1"))),
+        1 => {
+            let display = expect_identifier(&args[0], "drawflush argument must be an identifier")?;
+            Ok(Ins::DrawFlush(make_variable(display)))
+        },
+        count => Err(format!("drawflush accepts no arguments or one argument, not {count}"))
     }
-
-    let display = expect_identifier(&args[0], "drawflush argument must be an identifier")?;
-    Ok(Ins::DrawFlush(make_variable(display)))
 }
 
 fn sleep_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
