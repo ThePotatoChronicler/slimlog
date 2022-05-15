@@ -39,9 +39,9 @@ pub(crate) fn combine_set_and_set(ins1: &Ins, ins2: &Ins) -> Option<Ins> {
 
 pub(crate) fn check_null_set_or_op(ins: &Ins) -> bool {
     match ins {
-        Ins::Set { variable: Arg::Variable(Vartype::Named(var)), .. } => var == "null",
-        Ins::Op { result: Arg::Variable(Vartype::Named(var)), .. } => var == "null",
-        _ => false
+        Ins::Set { variable: Arg::Variable(Vartype::Named(var)), .. } => &**var == "null",
+        Ins::Op { result: Arg::Variable(Vartype::Named(var)), .. } => &**var == "null",
+        _ => false,
     }
 }
 

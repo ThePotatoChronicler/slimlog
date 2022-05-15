@@ -25,13 +25,13 @@ pub fn make_variable<'a, T: std::borrow::Borrow<Span<'a>>>(span: T) -> Arg {
 }
 
 /// Converts a span into a Literal
-pub fn make_literal_str<T: ToString>(span: T) -> Arg {
-    Literal(Type::Str(span.to_string()))
+pub fn make_literal_str(ctx: Ctx, span: &Span) -> Arg {
+    Literal(Type::Str(ctx.register_str(span)))
 }
 
 /// Creates a newline literal string
-pub fn newline() -> Arg {
-    make_literal_str("\\n")
+pub fn newline(ctx: Ctx) -> Arg {
+    str_to_var(ctx, "\\n")
 }
 
 /// Converts a span into a number, without checking if it is a valid number
@@ -67,7 +67,7 @@ pub fn make_not_string(ctx: Ctx, arg: &Argument, err: &str) -> Result<(Arg, Vec<
 pub fn make_generic(ctx: Ctx, arg: &Argument) -> Result<(Arg, Vec<Ins>), String> {
     let mut ins = Vec::new();
     let newarg = match arg {
-        Argument::String(span) => make_literal_str(span),
+        Argument::String(span) => make_literal_str(ctx, span),
         Argument::Number(num) => make_literal_num(num),
         Argument::Identifier(ident) => make_variable(ident),
         Argument::Statement(stmnt) => {
@@ -92,12 +92,12 @@ pub fn one() -> Arg {
     make_num(1)
 }
 
-pub fn null() -> Arg {
-    str_to_var("null")
+pub fn null(ctx: Ctx) -> Arg {
+    str_to_var(ctx, "null")
 }
 
-pub fn str_to_var<T: std::convert::AsRef<str>>(string: T) -> Arg {
-    Variable(Vartype::Named(string.as_ref().to_owned()))
+pub fn str_to_var<T: std::convert::AsRef<str>>(ctx: Ctx, string: T) -> Arg {
+    Variable(Vartype::Named(ctx.register_str(string.as_ref())))
 }
 
 /// Generates an unnamed variable for use in
@@ -126,9 +126,9 @@ pub fn generate_label(ctx: Ctx) -> usize {
 }
 
 /// Returns a variable argument to return to, or null
-pub fn ret_or_null(ret: Option<&Vartype>) -> Arg {
+pub fn ret_or_null(ctx: Ctx, ret: Option<&Vartype>) -> Arg {
     match ret {
         Some(s) => Variable(s.clone()),
-        None => null()
+        None => null(ctx)
     }
 }

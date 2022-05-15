@@ -2,6 +2,7 @@ use std::{
     str::FromStr,
     borrow::Cow,
     collections::HashMap,
+    rc::Rc,
 };
 use rand::rngs::StdRng;
 use super::{
@@ -11,20 +12,20 @@ use super::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     Literal(Type),
-    Variable(Vartype)
+    Variable(Vartype),
 }
 
 /// Type of variable
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Vartype {
-    Named(String),
-    Unnamed(usize)
+    Named(Rc<str>),
+    Unnamed(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Num(f64),
-    Str(String)
+    Str(Rc<str>),
 }
 
 type Label = usize;

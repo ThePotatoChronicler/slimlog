@@ -45,7 +45,6 @@ elif can be repeated many times.
 if <condition> <statement>
 [elif <condition> <statement>...]
 [else <statement>]
-
 ```
 
 ### while
@@ -72,7 +71,8 @@ _raw <code>
 ## Compound
 
 Compound commands make your life easier, they're common utilies or patterns,
-that you would otherwise have to use multiple basic commands to do
+that you would otherwise have to use multiple basic and compound commands
+to achieve the same effect
 
 ### iterlinks
 Sets up a basic while loop, iterating over all links.

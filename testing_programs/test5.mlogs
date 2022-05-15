@@ -1,7 +1,7 @@
 ( do
 	(control null enabled 0)
 	(control null shoot 0 0 0)
-	(control null shootp 0 0)
-	(control null configure 0)
+	(control null shootp enemy 0)
+	(control null configure @copper)
 	(control null color 0 0 0)
 )

@@ -426,7 +426,7 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
         "println" => {
             let (mut i, [a]) = generic_passthrough::<1>("println", newctx)?;
             i.push(Ins::Print(a));
-            i.push(Ins::Print(newline()));
+            i.push(Ins::Print(newline(ctx)));
             ins.extend(i);
         },
         "read" => ins.extend(read_function(newctx)?),
@@ -466,7 +466,7 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let (value, mut ins) = make_generic(ctx, &args[1])?;
     let var = make_variable(ident);
     ins.push(Ins::Set { variable: var.clone(), value });
-    ins.push(Ins::Set { variable: ret_or_null(ret), value: var });
+    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: var });
 
     Ok(ins)
 }
@@ -519,7 +519,7 @@ pub(crate) fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, Strin
         zero()
     };
 
-    ins.push(Ins::Op { op, result: ret_or_null(ret), left, right });
+    ins.push(Ins::Op { op, result: ret_or_null(ctx, ret), left, right });
 
     Ok(ins)
 }
@@ -582,7 +582,7 @@ fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     let (arg, mut ins) = make_not_string(ctx, &args[0], "The argument to getlink function cannot be a string")?;
-    ins.push(Ins::GetLink{store: ret_or_null(ret), index: arg});
+    ins.push(Ins::GetLink{store: ret_or_null(ctx, ret), index: arg});
     Ok(ins)
 }
 
@@ -606,12 +606,12 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     ins.push(Ins::Set { variable: itervar.clone(), value: zero() });
     ins.push(Ins::Label(repeat_label));
-    ins.push(Ins::GetLink { store: str_to_var("link"), index: itervar.clone() });
+    ins.push(Ins::GetLink { store: str_to_var(ctx, "link"), index: itervar.clone() });
     ins.push(Ins::Jump {
         label: exit_label,
         cmp: Comparison::StrictEquals,
         left: itervar.clone(),
-        right: str_to_var("null")
+        right: str_to_var(ctx, "null")
     });
     ins.extend(statement_ins);
     ins.push(Ins::Op {
@@ -624,7 +624,7 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         label: repeat_label,
         cmp: Comparison::LessThan,
         left: itervar,
-        right: str_to_var("@links")
+        right: str_to_var(ctx, "@links")
     });
     ins.push(Ins::Label(exit_label));
 
@@ -634,7 +634,7 @@ fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 fn printflush_function(ctx: Ctx) -> Result<Ins, String> {
     let Ctx { args, .. } = ctx;
     match args.len() {
-        0 => Ok(Ins::PrintFlush(str_to_var("message1"))),
+        0 => Ok(Ins::PrintFlush(str_to_var(ctx, "message1"))),
         1 => {
             let message = expect_identifier(&args[0], "printflush argument `message' must be an identifier")?;
             Ok(Ins::DrawFlush(make_variable(message)))
@@ -656,7 +656,7 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
     }
 
     let sensable = make_variable(sensable);
-    Ok(Ins::Sensor { result: ret_or_null(ret), target, sensable })
+    Ok(Ins::Sensor { result: ret_or_null(ctx, ret), target, sensable })
 }
 
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -766,7 +766,7 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     let mut ins = Vec::new();
-    let mut from: Arg = str_to_var("@this");
+    let mut from: Arg = str_to_var(ctx, "@this");
     let mut order: Arg = make_num(1);
     let mut sort: TargetSort = TargetSort::Distance;
     let mut conds: [TargetProp; 3] = [TargetProp::Any, TargetProp::Any, TargetProp::Any];
@@ -805,7 +805,7 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     ins.push(Ins::Radar {
         from,
         order,
-        result: ret_or_null(ret),
+        result: ret_or_null(ctx, ret),
         sort,
         conds
     });
@@ -860,7 +860,7 @@ fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     ins.push(Ins::UnitRadar {
         order,
-        result: ret_or_null(ret),
+        result: ret_or_null(ctx, ret),
         sort,
         conds
     });
@@ -888,7 +888,7 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     });
 
     ins.extend(bodyins);
-    ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
 
     /* NOTE
      * While this should probably be an optimization,
@@ -923,7 +923,7 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                         });
 
                         ins.extend(bodyins);
-                        ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+                        ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
                         ins.push(jump_to(end_label));
                     }
                     "else" => {
@@ -945,7 +945,7 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("else missing a body")?)?;
         ins.push(Ins::Label (next_label));
         ins.extend(bodyins);
-        ins.push(Ins::Set { variable: ret_or_null(ret), value: bodyresult });
+        ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
     } else {
         ins.push(Ins::Label(next_label));
     }
@@ -1118,7 +1118,7 @@ fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             );
     }
 
-    ins.push(Ins::UnitLocate { outx, outy, found: ret_or_null(ret), subcommand: subcmd });
+    ins.push(Ins::UnitLocate { outx, outy, found: ret_or_null(ctx, ret), subcommand: subcmd });
     Ok(ins)
 }
 
@@ -1311,7 +1311,7 @@ fn read_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             );
     }
 
-    ins.push(Ins::Read { at, cell, result: ret_or_null(ret) });
+    ins.push(Ins::Read { at, cell, result: ret_or_null(ctx, ret) });
 
     Ok(ins)
 }
@@ -1340,7 +1340,7 @@ fn write_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     }
 
     ins.push(Ins::Write { to, at, value: value.clone() });
-    ins.push(Ins::Set { variable: ret_or_null(ret), value });
+    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value });
 
     Ok(ins)
 }
@@ -1368,7 +1368,7 @@ fn noop_function(ctx: Ctx) -> Result<Ins, String> {
 fn drawflush_function(ctx: Ctx) -> Result<Ins, String> {
     let Ctx { args, .. } = ctx;
     match args.len() {
-        0 => Ok(Ins::DrawFlush(str_to_var("display1"))),
+        0 => Ok(Ins::DrawFlush(str_to_var(ctx, "display1"))),
         1 => {
             let display = expect_identifier(&args[0], "drawflush argument must be an identifier")?;
             Ok(Ins::DrawFlush(make_variable(display)))
@@ -1400,7 +1400,7 @@ fn sleep_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     ins.push(Ins::Op {
         op: Operation::Plus,
         result: end_time.clone(),
-        left: str_to_var("@time"),
+        left: str_to_var(ctx, "@time"),
         right: end_time.clone(),
     });
     ins.push(Ins::Op {
@@ -1415,7 +1415,7 @@ fn sleep_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     ins.push(Ins::Jump {
         cmp: Comparison::LessThan,
         label: repeat_label,
-        left: str_to_var("@time"),
+        left: str_to_var(ctx, "@time"),
         right: end_time,
     });
 
