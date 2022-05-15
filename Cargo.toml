@@ -5,7 +5,9 @@ description = "A lisp-like language that compiles to mlog"
 version = "0.1.0-alpha"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "slimlog"
+path = "src/cli.rs"
 
 [dependencies]
 blake2 = "0.10.4"

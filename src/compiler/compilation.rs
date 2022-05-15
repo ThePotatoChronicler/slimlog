@@ -40,7 +40,7 @@ pub fn compile(source: &str, settings: &Settings) -> Result<String, String> {
             }
         },
         Err(err) => {
-            Err(err.message)
+            Err(format!("{}", err))
         }
     }
 }

@@ -10,8 +10,7 @@ use nom::{
     bytes::complete::is_a,
     multi::many0_count,
     combinator::recognize,
-    Needed,
-    Slice
+    Slice,
 };
 
 use super::{
@@ -20,7 +19,7 @@ use super::{
     ast
 };
 
-pub type ParserResult<'a, I, O> = Result<(I, O), ParserError<'a>>;
+type IResult<'a, 'b> = nom::IResult<Span<'a>, Span<'b>>;
 
 /// Automatically converts input to a Span before passing it off to inner_tokenize
 pub fn tokenize(input: &str) -> Result<ast::Statement, ParserError>{
@@ -28,41 +27,53 @@ pub fn tokenize(input: &str) -> Result<ast::Statement, ParserError>{
 }
 
 pub fn inner_tokenize(input: Span) -> Result<ast::Statement, ParserError> {
-    let (r, _) = multispace0(input)?;
-    let (remains, b) = take_until_balanced('(', r, ')')?;
+    let (r, _) = multispace0::<_, nom::error::Error<_>>(input).unwrap();
+    let (remains, stmnt) = match statement(r) {
+        Ok(res) => res,
+        Err(stmnt_err) => match stmnt_err {
+            StatementError::ParseArg(err) => return Err(err),
+            StatementError::NotAStatement => return Err(ParserError::from((
+                "Program must begin with a statement",
+                r,
+            ))),
+            other => return Err(common_parse_some_statement_error(other, input)),
+        }
+    };
+    let (remains, _) = multispace0::<_, nom::error::Error<_>>(remains).unwrap();
 
-    let (remains, _) = multispace0(remains)?;
     if !remains.is_empty() {
-        return Err(ParserError::new("Extra characters after main block", remains))
-    }
-
-    let (r, stmnt) = statement(b)?;
-    if !r.is_empty() {
-        Err(ParserError::new("Extra characters in main block", r))
+        Err(ParserError::from(("Extra characters after main statement", remains)))
     } else {
         Ok(stmnt)
     }
 }
 
-pub fn identifier(input: Span) -> ParserResult<Span, Span> {
-    Ok(recognize(
+pub fn identifier(input: Span) -> IResult {
+    recognize(
         pair(
             is_a(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-*/|&=_<>@#"),
             many0_count(is_a(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-*/|&=_<>@#0123456789"))
         )
-    )(input)?)
+    )(input)
 }
 
-pub fn decimal(input: Span) -> ParserResult<Span, Span> {
-    Ok(is_a("0123456789")(input)?)
+pub fn decimal(input: Span) -> IResult {
+    is_a("0123456789")(input)
 }
 
-pub fn string(input: Span) -> ParserResult<Span, Span> {
+#[derive(Debug)]
+pub enum StringError {
+    NotAString,
+    Unmatched,
+}
+
+pub fn string(input: Span) -> Result<(Span, Span), StringError> {
 
     // Gets one of the two characters, or errors out
-    let (_, start) = one_of("\"'")(input)?;
+    let (_, start) = one_of::<_, _, nom::error::Error<_>>(r#""'"#)(input)
+        .map_err(|_| StringError::NotAString)?;
 
     let mut esc: bool = false;
     let mut index = 1;
@@ -78,13 +89,22 @@ pub fn string(input: Span) -> ParserResult<Span, Span> {
                 }
                 index += 1;
             },
-            None => return Err(ParserError::new("Unmatched quote", input))
+            None => return Err(StringError::Unmatched)
         }
     }
 }
 
-pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> ParserResult<Span, Span> {
-    let (i, _) = char(opening)(txt)?;
+#[derive(Debug)]
+pub enum BalanceError {
+    /// Missing opening
+    Start,
+    /// Missing endings
+    End(u32)
+}
+
+pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> Result<(Span, Span), BalanceError> {
+    let (i, _) = char::<_, nom::error::Error<_>>(opening)(txt)
+        .map_err(|_| BalanceError::Start)?;
     let mut index = 0;
     let mut depth = 1;
     loop {
@@ -96,7 +116,7 @@ pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> ParserRe
                 _ => ()
             };
         } else {
-            Err(nom::Err::Incomplete::<nom::error::Error<Span>>(Needed::Unknown))?
+            return Err(BalanceError::End(depth))
         }
 
         if depth == 0 {
@@ -107,46 +127,88 @@ pub fn take_until_balanced (opening: char, txt: Span, closing: char) -> ParserRe
     }
 }
 
-pub fn statement(input: Span) -> ParserResult<Span, ast::Statement> {
-    let (r, _) = multispace0(input)?;
-    let (r, command) = identifier(r)?;
+pub enum StatementError<'a> {
+    /// This is not a statement
+    NotAStatement,
+    /// Invalid identifier for command
+    InvalidIdent(Span<'a>),
+    /// Unclosed statement
+    Unclosed(u32),
+    /// Failed to parse argument
+    ParseArg(ParserError<'a>)
+}
+
+pub fn statement(input: Span) -> Result<(Span, ast::Statement), StatementError> {
+    let (statement_remains, stmnt_blk) = match take_until_balanced('(', input, ')') {
+        Ok(res) => res,
+        Err(err) => match err {
+            BalanceError::Start => return Err(StatementError::NotAStatement),
+            BalanceError::End(brackets) => return Err(StatementError::Unclosed(brackets)),
+        }
+    };
+
+    let (r, _) = multispace0::<_, nom::error::Error<_>>(stmnt_blk).unwrap();
+    let (r, command) = identifier(r)
+        .map_err(|_| StatementError::InvalidIdent(r))?;
     let mut arguments: Vec<ast::Argument> = Vec::new();
     let mut inr = r;
     loop {
-        (inr, _) = multispace0(inr)?;
+        (inr, _) = multispace0::<_, nom::error::Error<_>>(inr).unwrap();
         if inr.is_empty() {
             break
         }
-        let arg: ast::Argument = {
-            if let Ok((r, idnt)) = identifier(inr) {
-                inr = r;
-                ast::Argument::Identifier(idnt)
-            } else if let Ok((r, dcml)) = decimal(inr) {
-                inr = r;
-                ast::Argument::Number(dcml)
-            } else if let Ok((r, strng)) = string(inr) {
-                inr = r;
-                ast::Argument::String(strng)
-            } else if let Ok((r, blk)) = take_until_balanced('(', inr, ')') {
-                inr = r;
-                let (b, _) = multispace0(blk)?;
-                let (remains, stmnt) = statement(b)?;
-                let (remains, _) = multispace0(remains)?;
-                if !remains.is_empty() {
-                    return Err(ParserError::new("Extra characters in statement", remains))
-                } else {
-                    ast::Argument::Statement(stmnt)
-                }
-            } else {
-                return Err(ParserError::new("Not a valid argument", inr))
-            }
-        };
+        let (remains, arg): (Span, ast::Argument) = parse_arg(inr)
+            .map_err(|e| StatementError::ParseArg(e))?;
+
+        inr = remains;
+
         arguments.push(arg);
     }
-    let r = inr;
-    Ok((r, ast::Statement { command, arguments }))
+    Ok((statement_remains, ast::Statement { command, arguments }))
 }
 
-#[cfg(test)]
-mod tests {
+fn parse_arg(input: Span) -> Result<(Span, ast::Argument), ParserError> {
+    use ast::Argument;
+
+    if let Ok((r, ident)) = identifier(input) {
+        return Ok((r, Argument::Identifier(ident)));
+    }
+
+    if let Ok((r, dcml)) = decimal(input) {
+        return Ok((r, Argument::Number(dcml)));
+    }
+
+    match string(input) {
+        Ok((r, parsed_string)) => return Ok((r, Argument::String(parsed_string))),
+        Err(StringError::NotAString) => (),
+        Err(StringError::Unmatched) => return Err(ParserError::from(("Unmatched string delimiter", input))),
+    }
+
+    match statement(input) {
+        Ok((r, stmnt)) => return Ok((r, Argument::Statement(stmnt))),
+        Err(err) => match err {
+            StatementError::NotAStatement => (),
+            StatementError::ParseArg(err) => return Err(err),
+            other => return Err(common_parse_some_statement_error(other, input)),
+        }
+    }
+
+    Err(ParserError::from(("Unparsable argument", input)))
+}
+
+fn common_parse_some_statement_error<'s>(err: StatementError<'s>, span: Span<'s>) -> ParserError<'s> {
+    match err {
+        StatementError::InvalidIdent(identspan) => ParserError::from((
+            "Statement must begin with a valid identifier",
+            identspan
+        )),
+        StatementError::Unclosed(brackets) => {
+            let s = if brackets == 1 { "" } else { "s" };
+            ParserError::from((
+                format!("Unclosed statement, {brackets} bracket{s} left open"),
+                span
+            ))
+        },
+        _ => unimplemented!("Other errors should not be parsed with this function"),
+    }
 }

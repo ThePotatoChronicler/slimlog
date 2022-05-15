@@ -62,7 +62,7 @@ fn main() {
             println!("{}", out);
         },
         Err(error) => {
-            error!("Error: {}", error);
+            error!("{}", error);
             std::process::exit(1)
         }
     }
