@@ -30,7 +30,7 @@ but it will not report any kind of syntax error whatsoever, instead handing out 
 
 The compiler is functional, but it will not report the location of compilation errors yet
 
-* [ ] Proper parser errors
+* [x] Proper parser errors
 * [x] All processor instructions
 * [x] Documentation
 * [ ] Virtual processor
