@@ -1,25 +1,17 @@
+use crate::compiler::instructions::Arg::Variable;
+
 use super::{
-    parser,
-    instructions::{
-        self,
-        Ins,
-        Arg,
-        Operation,
-        Comparison,
-    },
-    ast::{ self, Argument },
-    error::ParserError,
+    ast::{self, Argument},
     compiler_utils::*,
-    context::{
-        Context,
-        Ctx,
-    },
+    context::{Context, Ctx},
+    error::ParserError,
+    instructions::{self, Arg, Comparison, Ins, Operation},
+    optimizations, parser,
     settings::Settings,
     utils,
-    optimizations,
 };
 
-use log::{ warn, debug, info };
+use log::{debug, info, warn};
 
 pub fn compile(source: &str, settings: &Settings) -> Result<String, String> {
     let tokens: Result<ast::Statement, ParserError> = parser::tokenize(source);
@@ -35,13 +27,11 @@ pub fn compile(source: &str, settings: &Settings) -> Result<String, String> {
                     info!("PRNG Seed: {}", hex::encode(seed));
 
                     translate(&ins, settings, &seed).map(|r| r.join("\n"))
-                },
-                Err(err) => Err(err)
+                }
+                Err(err) => Err(err),
             }
-        },
-        Err(err) => {
-            Err(format!("{}", err))
         }
+        Err(err) => Err(format!("{}", err)),
     }
 }
 
@@ -49,8 +39,8 @@ pub fn compile(source: &str, settings: &Settings) -> Result<String, String> {
 ///
 /// seed is used to create random hexadecimal names
 pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Vec<String>, String> {
-    use std::collections::HashMap;
     use rand::SeedableRng;
+    use std::collections::HashMap;
 
     let optimized_instructions = if settings.get_transopts() {
         let optimized = repeated_optimize(ins);
@@ -64,7 +54,8 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
 
     // Translated instructions
     let mut result: Vec<String> = Vec::new();
-    let labels: HashMap<usize, usize> = { // Filling in labels
+    let labels: HashMap<usize, usize> = {
+        // Filling in labels
         let mut lbls = HashMap::new();
         let mut depth = 0;
         for inst in ins {
@@ -72,7 +63,7 @@ pub fn translate(ins: &[Ins], settings: &Settings, seed: &[u8; 32]) -> Result<Ve
             if let Ins::Label(label) = inst {
                 let previous = lbls.insert(*label, depth);
                 if previous.is_some() {
-                    return Err("A label appeared for a second time, this should never happen! Contact author(s)".into())
+                    return Err("A label appeared for a second time, this should never happen! Contact author(s)".into());
                 }
             }
         }
@@ -331,7 +322,6 @@ pub fn optimize(ins: &[Ins]) -> Vec<Ins> {
 
         // We need two instructions
         if it != ins.len() - 1 {
-
             if let Some(new_instruction) = combine_set_and_set(&ins[it], &ins[it + 1]) {
                 res.push(new_instruction);
                 it += 2;
@@ -399,7 +389,7 @@ pub fn repeated_optimize(ins: &[Ins]) -> Vec<Ins> {
 
 /// The standard function to compile a [`ast::Statement`]
 ///
-/// Replaces the `ctx`'s arguments 
+/// Replaces the `ctx`'s arguments
 pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<Vec<Ins>, String> {
     use std::str::FromStr;
     let mut ins = Vec::new();
@@ -422,13 +412,13 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             let (mut i, [a]) = generic_passthrough::<1>("print", newctx)?;
             i.push(Ins::Print(a));
             ins.extend(i);
-        },
+        }
         "println" => {
             let (mut i, [a]) = generic_passthrough::<1>("println", newctx)?;
             i.push(Ins::Print(a));
             i.push(Ins::Print(newline(ctx)));
             ins.extend(i);
-        },
+        }
         "read" => ins.extend(read_function(newctx)?),
         "set" => ins.extend(set_function(newctx)?),
         "sensor" => ins.push(sensor_function(newctx)?),
@@ -450,7 +440,7 @@ pub(crate) fn compile_statement(statement: &ast::Statement, ctx: Ctx) -> Result<
             return Ok(ins);
         }
 
-        return Err(format!("Unknown command: {}", statement.command.fragment()))
+        return Err(format!("Unknown command: {}", statement.command.fragment()));
     }
 }
 
@@ -465,8 +455,14 @@ fn set_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     let (value, mut ins) = make_generic(ctx, &args[1])?;
     let var = make_variable(ident);
-    ins.push(Ins::Set { variable: var.clone(), value });
-    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: var });
+    ins.push(Ins::Set {
+        variable: var.clone(),
+        value,
+    });
+    ins.push(Ins::Set {
+        variable: ret_or_null(ctx, ret),
+        value: var,
+    });
 
     Ok(ins)
 }
@@ -519,7 +515,12 @@ pub(crate) fn make_expression(op: Operation, ctx: Ctx) -> Result<Vec<Ins>, Strin
         zero()
     };
 
-    ins.push(Ins::Op { op, result: ret_or_null(ctx, ret), left, right });
+    ins.push(Ins::Op {
+        op,
+        result: ret_or_null(ctx, ret),
+        left,
+        right,
+    });
 
     Ok(ins)
 }
@@ -540,23 +541,35 @@ fn while_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     let mut ins = Vec::new();
 
-
     let back_label = generate_label(ctx);
     let forward_label = generate_label(ctx);
     ins.push(Ins::Label(back_label));
     ins.extend(condition_ins);
-    ins.push(Ins::Jump { label: forward_label, cmp: Comparison::StrictEquals, left: condition, right: zero() });
+    ins.push(Ins::Jump {
+        label: forward_label,
+        cmp: Comparison::StrictEquals,
+        left: condition,
+        right: zero(),
+    });
 
     ins.extend(loop_ins);
 
-    ins.push(Ins::Jump { label: back_label, cmp: Comparison::Always, left: zero(), right: zero() });
+    ins.push(Ins::Jump {
+        label: back_label,
+        cmp: Comparison::Always,
+        left: zero(),
+        right: zero(),
+    });
     ins.push(Ins::Label(forward_label));
 
     Ok(ins)
 }
 
 /// Cleanly passes through N arguments
-pub(crate) fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> Result<(Vec<Ins>, [Arg; N]), String> {
+pub(crate) fn generic_passthrough<const N: usize>(
+    funcname: &str,
+    ctx: Ctx,
+) -> Result<(Vec<Ins>, [Arg; N]), String> {
     let args = ctx.args;
 
     let mut ins = Vec::new();
@@ -578,53 +591,65 @@ pub(crate) fn generic_passthrough<const N: usize>(funcname: &str, ctx: Ctx) -> R
 fn getlink_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let Ctx { args, ret, .. } = ctx;
     if args.len() != 1 {
-        return Err("getlink function accepts exactly one argument".into())
+        return Err("getlink function accepts exactly one argument".into());
     }
 
-    let (arg, mut ins) = make_not_string(ctx, &args[0], "The argument to getlink function cannot be a string")?;
-    ins.push(Ins::GetLink{store: ret_or_null(ctx, ret), index: arg});
+    let (arg, mut ins) = make_not_string(
+        ctx,
+        &args[0],
+        "The argument to getlink function cannot be a string",
+    )?;
+    ins.push(Ins::GetLink {
+        store: ret_or_null(ctx, ret),
+        index: arg,
+    });
     Ok(ins)
 }
 
 fn iterlinks_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let args = ctx.args;
     if args.len() != 1 {
-        return Err("iterlinks function accepts exactly one argument".into())
+        return Err("iterlinks function accepts exactly one argument".into());
     }
 
     let mut ins = Vec::new();
-    let statement_ins =
-        if let Argument::Statement(stmnt) = &args[0] {
-            compile_statement(stmnt, ctx.no_ret())?
-        } else {
-            return Err("iterlinks argument must be a statement".into());
+    let statement_ins = if let Argument::Statement(stmnt) = &args[0] {
+        compile_statement(stmnt, ctx.no_ret())?
+    } else {
+        return Err("iterlinks argument must be a statement".into());
     };
 
     let itervar = generate_variable(ctx);
     let repeat_label = generate_label(ctx);
     let exit_label = generate_label(ctx);
 
-    ins.push(Ins::Set { variable: itervar.clone(), value: zero() });
+    ins.push(Ins::Set {
+        variable: itervar.clone(),
+        value: zero(),
+    });
     ins.push(Ins::Label(repeat_label));
-    ins.push(Ins::GetLink { store: str_to_var(ctx, "link"), index: itervar.clone() });
+    ins.push(Ins::GetLink {
+        store: str_to_var(ctx, "link"),
+        index: itervar.clone(),
+    });
     ins.push(Ins::Jump {
         label: exit_label,
         cmp: Comparison::StrictEquals,
         left: itervar.clone(),
-        right: str_to_var(ctx, "null")
+        right: str_to_var(ctx, "null"),
     });
     ins.extend(statement_ins);
     ins.push(Ins::Op {
         op: Operation::Plus,
         result: itervar.clone(),
         left: itervar.clone(),
-        right: one()
+        right: one(),
     });
     ins.push(Ins::Jump {
         label: repeat_label,
         cmp: Comparison::LessThan,
         left: itervar,
-        right: str_to_var(ctx, "@links")
+        right: str_to_var(ctx, "@links"),
     });
     ins.push(Ins::Label(exit_label));
 
@@ -636,10 +661,15 @@ fn printflush_function(ctx: Ctx) -> Result<Ins, String> {
     match args.len() {
         0 => Ok(Ins::PrintFlush(str_to_var(ctx, "message1"))),
         1 => {
-            let message = expect_identifier(&args[0], "printflush argument `message' must be an identifier")?;
+            let message = expect_identifier(
+                &args[0],
+                "printflush argument `message' must be an identifier",
+            )?;
             Ok(Ins::DrawFlush(make_variable(message)))
-        },
-        count => Err(format!("printflush accepts no arguments or one argument, not {count}"))
+        }
+        count => Err(format!(
+            "printflush accepts no arguments or one argument, not {count}"
+        )),
     }
 }
 
@@ -649,14 +679,24 @@ fn sensor_function(ctx: Ctx) -> Result<Ins, String> {
         return Err("sensor function accepts exactly two arguments".into());
     }
 
-    let target = make_variable(expect_identifier(&args[0], "first argument `block' to sensor must be an identifier")?);
-    let sensable = expect_identifier(&args[1], "second argument `sensable' to sensor must be an identifier")?;
+    let target = make_variable(expect_identifier(
+        &args[0],
+        "first argument `block' to sensor must be an identifier",
+    )?);
+    let sensable = expect_identifier(
+        &args[1],
+        "second argument `sensable' to sensor must be an identifier",
+    )?;
     if !sensable.starts_with('@') {
         warn!("second argument `sensable' to sensor should probably begin with a @");
     }
 
     let sensable = make_variable(sensable);
-    Ok(Ins::Sensor { result: ret_or_null(ctx, ret), target, sensable })
+    Ok(Ins::Sensor {
+        result: ret_or_null(ctx, ret),
+        target,
+        sensable,
+    })
 }
 
 fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
@@ -666,11 +706,20 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::with_capacity(3);
     let mut argi = args.iter();
 
-    let target = argi.next().ok_or("control missing required argument `target'")?;
-    let target = make_variable(
-        expect_identifier(target, "first argument `target' to control function must be an identifier")?);
-    let subcmd = argi.next().ok_or("control missing required argument `subcommand'")?;
-    let subcmd = expect_identifier(subcmd, "second argument `subcommand' to control function must be an identifier")?;
+    let target = argi
+        .next()
+        .ok_or("control missing required argument `target'")?;
+    let target = make_variable(expect_identifier(
+        target,
+        "first argument `target' to control function must be an identifier",
+    )?);
+    let subcmd = argi
+        .next()
+        .ok_or("control missing required argument `subcommand'")?;
+    let subcmd = expect_identifier(
+        subcmd,
+        "second argument `subcommand' to control function must be an identifier",
+    )?;
 
     // Macro to make this function slightly shorter
     macro_rules! notstr {
@@ -701,44 +750,51 @@ fn control_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         "enabled" => {
             notstr!(enabled, enabled);
             ControlSI::Enabled(enabled)
-        },
+        }
         "shoot" => {
             notstr!(shoot, x, y, shoot);
             ControlSI::Shoot { x, y, shoot }
-        },
+        }
         "shootp" => {
-            let unit = argi.next().ok_or("control shootp missing argument `unit'")?;
-            let unit = make_variable(
-                expect_identifier(unit, "control shootp argument `unit' must be an identifier")?);
+            let unit = argi
+                .next()
+                .ok_or("control shootp missing argument `unit'")?;
+            let unit = make_variable(expect_identifier(
+                unit,
+                "control shootp argument `unit' must be an identifier",
+            )?);
             notstr!(shootp, shoot);
 
             ControlSI::Shootp { unit, shoot }
-        },
+        }
         "configure" => {
-            let configuration = argi.next().ok_or("control configure missing argument `configuration'")?;
-            let configuration = make_variable(
-                expect_identifier(
-                    configuration,
-                    "control configure argument `configuration' must be an identifier")?
-                );
+            let configuration = argi
+                .next()
+                .ok_or("control configure missing argument `configuration'")?;
+            let configuration = make_variable(expect_identifier(
+                configuration,
+                "control configure argument `configuration' must be an identifier",
+            )?);
 
             ControlSI::Configure(configuration)
-        },
+        }
         "color" => {
             notstr!(color, r, g, b);
-            ControlSI::Color{ r, g, b }
-        },
-        invalid => return Err(format!("Invalid control subcommand `{}'", invalid))
+            ControlSI::Color { r, g, b }
+        }
+        invalid => return Err(format!("Invalid control subcommand `{}'", invalid)),
     };
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to control subcommand `{}'",
-                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcmd)
-            );
+        return Err(format!(
+            "{} extra argument{} to control subcommand `{}'",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" },
+            *subcmd
+        ));
     }
 
-    ins.push(Ins::Control{ target, subcommand });
+    ins.push(Ins::Control { target, subcommand });
     Ok(ins)
 }
 
@@ -758,7 +814,7 @@ fn bind_function(ctx: Ctx) -> Result<Ins, String> {
 
 /// radar <from> <sort> <order> <prop> <prop> <prop>
 fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
-    use instructions::{ TargetProp, TargetSort };
+    use instructions::{TargetProp, TargetSort};
     let Ctx { args, ret, .. } = ctx;
 
     if args.len() > 6 {
@@ -773,32 +829,56 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     if !args.is_empty() {
         // First argument
-        from = make_variable(expect_identifier(&args[0], "First argument to radar must be a string")?);
+        from = make_variable(expect_identifier(
+            &args[0],
+            "First argument to radar must be a string",
+        )?);
 
         if args.len() >= 2 {
-            let ident = expect_identifier(&args[1], "The `sort` argument to radar must be an identifier")?;
-            sort = ident.parse().map_err(|_| "Second argument to radar must be a valid sort")?;
+            let ident = expect_identifier(
+                &args[1],
+                "The `sort` argument to radar must be an identifier",
+            )?;
+            sort = ident
+                .parse()
+                .map_err(|_| "Second argument to radar must be a valid sort")?;
         }
 
         if args.len() >= 3 {
-            let (neworder, newins) = make_not_string(ctx, &args[2], "Third argument to radar cannot be a string")?;
+            let (neworder, newins) =
+                make_not_string(ctx, &args[2], "Third argument to radar cannot be a string")?;
             order = neworder;
             ins.extend(newins);
         }
 
         if args.len() >= 4 {
-            let ident = expect_identifier(&args[3], "The first condition argument to radar must be an identifier")?;
-            conds[0] = ident.parse().map_err(|_| "Fourth argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[3],
+                "The first condition argument to radar must be an identifier",
+            )?;
+            conds[0] = ident
+                .parse()
+                .map_err(|_| "Fourth argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 5 {
-            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
-            conds[1] = ident.parse().map_err(|_| "Fifth argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[4],
+                "The second condition argument to radar must be an identifier",
+            )?;
+            conds[1] = ident
+                .parse()
+                .map_err(|_| "Fifth argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 6 {
-            let ident = expect_identifier(&args[5], "The third condition argument to radar must be an identifier")?;
-            conds[2] = ident.parse().map_err(|_| "Sixth argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[5],
+                "The third condition argument to radar must be an identifier",
+            )?;
+            conds[2] = ident
+                .parse()
+                .map_err(|_| "Sixth argument to radar must be a valid condition")?;
         }
     }
 
@@ -807,12 +887,11 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         order,
         result: ret_or_null(ctx, ret),
         sort,
-        conds
+        conds,
     });
 
     Ok(ins)
 }
-
 
 /// uradar <sort> <order> <prop> <prop> <prop>
 ///
@@ -820,7 +899,7 @@ fn radar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 /// without the `from` argument, but this is the easiest way to handle it.
 /// TODO Maybe figure out a better way without duplicating code
 fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
-    use instructions::{ TargetProp, TargetSort };
+    use instructions::{TargetProp, TargetSort};
     let Ctx { args, ret, .. } = ctx;
 
     if args.len() > 5 {
@@ -833,28 +912,49 @@ fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut conds: [TargetProp; 3] = [TargetProp::Any, TargetProp::Any, TargetProp::Any];
 
     if !args.is_empty() {
-        let ident = expect_identifier(&args[0], "The `sort` argument to radar must be an identifier")?;
-        sort = ident.parse().map_err(|_| "First argument to radar must be a valid sort")?;
+        let ident = expect_identifier(
+            &args[0],
+            "The `sort` argument to radar must be an identifier",
+        )?;
+        sort = ident
+            .parse()
+            .map_err(|_| "First argument to radar must be a valid sort")?;
 
         if args.len() >= 2 {
-            let (neworder, newins) = make_not_string(ctx, &args[1], "Second argument to radar cannot be a string")?;
+            let (neworder, newins) =
+                make_not_string(ctx, &args[1], "Second argument to radar cannot be a string")?;
             order = neworder;
             ins.extend(newins);
         }
 
         if args.len() >= 3 {
-            let ident = expect_identifier(&args[2], "The first condition argument to radar must be an identifier")?;
-            conds[0] = ident.parse().map_err(|_| "Third argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[2],
+                "The first condition argument to radar must be an identifier",
+            )?;
+            conds[0] = ident
+                .parse()
+                .map_err(|_| "Third argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 4 {
-            let ident = expect_identifier(&args[3], "The second condition argument to radar must be an identifier")?;
-            conds[1] = ident.parse().map_err(|_| "Fourth argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[3],
+                "The second condition argument to radar must be an identifier",
+            )?;
+            conds[1] = ident
+                .parse()
+                .map_err(|_| "Fourth argument to radar must be a valid condition")?;
         }
 
         if args.len() >= 5 {
-            let ident = expect_identifier(&args[4], "The second condition argument to radar must be an identifier")?;
-            conds[2] = ident.parse().map_err(|_| "Fifth argument to radar must be a valid condition")?;
+            let ident = expect_identifier(
+                &args[4],
+                "The second condition argument to radar must be an identifier",
+            )?;
+            conds[2] = ident
+                .parse()
+                .map_err(|_| "Fifth argument to radar must be a valid condition")?;
         }
     }
 
@@ -862,7 +962,7 @@ fn uradar_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         order,
         result: ret_or_null(ctx, ret),
         sort,
-        conds
+        conds,
     });
 
     Ok(ins)
@@ -877,18 +977,25 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let end_label = generate_label(ctx);
 
     // if part
-    let (condition, mut ins) = make_generic(ctx, argi.next().ok_or("if function missing a condition")?)?;
-    let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("if function missing a body")?)?;
+    let (condition, mut ins) =
+        make_generic(ctx, argi.next().ok_or("if function missing a condition")?)?;
+    let (bodyresult, bodyins) =
+        make_generic(ctx, argi.next().ok_or("if function missing a body")?)?;
 
     ins.push(Ins::Jump {
         label: next_label,
         cmp: Comparison::StrictEquals,
         left: condition,
-        right: zero()
+        right: zero(),
     });
 
     ins.extend(bodyins);
-    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
+    if let Some(ret) = ret {
+        ins.push(Ins::Set {
+            variable: Variable(ret.clone()),
+            value: bodyresult,
+        });
+    }
 
     /* NOTE
      * While this should probably be an optimization,
@@ -907,10 +1014,12 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                 argi.next(); // Skip what we just looked at
                 match **ident {
                     "elif" => {
-                        let (condition, condition_ins) = make_generic(ctx, argi.next().ok_or("elif missing a condition")?)?;
-                        let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("elif missing a body")?)?;
+                        let (condition, condition_ins) =
+                            make_generic(ctx, argi.next().ok_or("elif missing a condition")?)?;
+                        let (bodyresult, body_instructions) =
+                            make_generic(ctx, argi.next().ok_or("elif missing a body")?)?;
 
-                        ins.push(Ins::Label (next_label));
+                        ins.push(Ins::Label(next_label));
                         ins.extend(condition_ins);
 
                         next_label = generate_label(ctx);
@@ -919,33 +1028,47 @@ fn if_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
                             label: next_label,
                             cmp: Comparison::StrictEquals,
                             left: condition,
-                            right: zero()
+                            right: zero(),
                         });
 
-                        ins.extend(bodyins);
-                        ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
+                        ins.extend(body_instructions);
+                        ins.push(Ins::Set {
+                            variable: ret_or_null(ctx, ret),
+                            value: bodyresult,
+                        });
                         ins.push(jump_to(end_label));
                     }
                     "else" => {
                         else_part = true;
                         break;
-                    },
-                    any => return Err(format!("unexpected identifier `{}` as argument to `if' function", any)),
+                    }
+                    any => {
+                        return Err(format!(
+                            "unexpected identifier `{}` as argument to `if' function",
+                            any
+                        ))
+                    }
                 };
-            },
+            }
             Some(_) => {
                 let index = args.len() - argi.count();
-                return Err(format!("argument {} of function `if' should be an identifier `elif` or `else`", index));
-            },
-            _ => break
+                return Err(format!(
+                    "argument {} of function `if' should be an identifier `elif` or `else`",
+                    index
+                ));
+            }
+            _ => break,
         };
     }
 
     if else_part {
         let (bodyresult, bodyins) = make_generic(ctx, argi.next().ok_or("else missing a body")?)?;
-        ins.push(Ins::Label (next_label));
+        ins.push(Ins::Label(next_label));
         ins.extend(bodyins);
-        ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value: bodyresult });
+        ins.push(Ins::Set {
+            variable: ret_or_null(ctx, ret),
+            value: bodyresult,
+        });
     } else {
         ins.push(Ins::Label(next_label));
     }
@@ -993,58 +1116,96 @@ fn draw_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
         "clear" => {
             notstr!(clear, r, g, b);
             DrawSI::Clear { r, g, b }
-        },
+        }
         "color" => {
             notstr!(color, r, g, b, a);
             DrawSI::Color { r, g, b, a }
-        },
+        }
         "stroke" => {
             notstr!(stroke, stroke);
             DrawSI::Stroke(stroke)
-        },
+        }
         "line" => {
             notstr!(line, x1, y1, x2, y2);
             DrawSI::Line { x1, y1, x2, y2 }
-        },
+        }
         "rect" => {
             notstr!(rect, x, y, width, height);
-            DrawSI::Rect { x, y, width, height }
-        },
+            DrawSI::Rect {
+                x,
+                y,
+                width,
+                height,
+            }
+        }
         "linerect" => {
             notstr!(linerect, x, y, width, height);
-            DrawSI::LineRect { x, y, width, height }
-        },
+            DrawSI::LineRect {
+                x,
+                y,
+                width,
+                height,
+            }
+        }
         "poly" => {
             notstr!(poly, x, y, sides, radius, rotation);
-            DrawSI::Poly { x, y, sides, radius, rotation }
-        },
+            DrawSI::Poly {
+                x,
+                y,
+                sides,
+                radius,
+                rotation,
+            }
+        }
         "linepoly" => {
             notstr!(linepoly, x, y, sides, radius, rotation);
-            DrawSI::LinePoly { x, y, sides, radius, rotation }
-        },
+            DrawSI::LinePoly {
+                x,
+                y,
+                sides,
+                radius,
+                rotation,
+            }
+        }
         "triangle" => {
             notstr!(triangle, x1, y1, x2, y2, x3, y3);
-            DrawSI::Triangle { x1, y1, x2, y2, x3, y3 }
-        },
+            DrawSI::Triangle {
+                x1,
+                y1,
+                x2,
+                y2,
+                x3,
+                y3,
+            }
+        }
         "image" => {
             notstr!(image, x, y);
             let image = argi.next().ok_or("draw image missing argument `image'")?;
-            let image = expect_identifier(image, "draw image argument `image' must be an identifier")?;
+            let image =
+                expect_identifier(image, "draw image argument `image' must be an identifier")?;
             if !image.starts_with('@') {
                 warn!("draw image argument `image' should probably begin with an @");
             }
             let image = make_variable(image);
             notstr!(image, size, rotation);
-            DrawSI::Image { x, y, image, size, rotation }
+            DrawSI::Image {
+                x,
+                y,
+                image,
+                size,
+                rotation,
+            }
         }
         _ => return Err(format!("Unknown draw subcommand `{}'", *subcommand)),
     };
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to control subcommand `{}'",
-                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
-            );
+        return Err(format!(
+            "{} extra argument{} to control subcommand `{}'",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" },
+            *subcommand
+        ));
     }
 
     ins.push(Ins::Draw(si));
@@ -1062,11 +1223,27 @@ fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let subcommand = argi.next().ok_or("ulocate function missing subcommand")?;
     let subcommand = expect_identifier(subcommand, "ulocate subcommand must be an identifier")?;
 
-    let outx = argi.next().ok_or(format!("ulocate {} missing argument `outx'", *subcommand))?;
-    let outx = expect_identifier(outx, &format!("ulocate {} argument `outx' must be an identifier", *subcommand))?;
+    let outx = argi
+        .next()
+        .ok_or(format!("ulocate {} missing argument `outx'", *subcommand))?;
+    let outx = expect_identifier(
+        outx,
+        &format!(
+            "ulocate {} argument `outx' must be an identifier",
+            *subcommand
+        ),
+    )?;
     let outx = make_variable(outx);
-    let outy = argi.next().ok_or(format!("ulocate  {} missing argument `outy'", *subcommand))?;
-    let outy = expect_identifier(outy, &format!("ulocate {} argument `outy' must be an identifier", *subcommand))?;
+    let outy = argi
+        .next()
+        .ok_or(format!("ulocate  {} missing argument `outy'", *subcommand))?;
+    let outy = expect_identifier(
+        outy,
+        &format!(
+            "ulocate {} argument `outy' must be an identifier",
+            *subcommand
+        ),
+    )?;
     let outy = make_variable(outy);
 
     let subcmd: UnitLocateSI = match *subcommand {
@@ -1079,46 +1256,85 @@ fn ulocate_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             let ore = make_variable(ore);
 
             UnitLocateSI::Ore(ore)
-        },
+        }
         "spawn" => {
-            let spawn = argi.next().ok_or("ulocate spawn missing argument `spawn'")?;
-            let spawn = expect_identifier(spawn, "ulocate spawn argument `spawn' must be an identifier")?;
+            let spawn = argi
+                .next()
+                .ok_or("ulocate spawn missing argument `spawn'")?;
+            let spawn = expect_identifier(
+                spawn,
+                "ulocate spawn argument `spawn' must be an identifier",
+            )?;
             let spawn = make_variable(spawn);
             UnitLocateSI::Spawn(spawn)
-        },
+        }
         "damaged" => {
-            let damaged = argi.next().ok_or("ulocate damaged missing argument `damaged'")?;
-            let damaged = expect_identifier(damaged, "ulocate damaged argument `damaged' must be an identifier")?;
+            let damaged = argi
+                .next()
+                .ok_or("ulocate damaged missing argument `damaged'")?;
+            let damaged = expect_identifier(
+                damaged,
+                "ulocate damaged argument `damaged' must be an identifier",
+            )?;
             let damaged = make_variable(damaged);
 
             UnitLocateSI::Damaged(damaged)
-        },
+        }
         "building" => {
-            let group = argi.next().ok_or("ulocate building missing argument `group'")?;
-            let group = expect_identifier(group, "ulocate building argument `group' must be an identifier")?;
-            let group = group.parse().map_err(|_| "ulocate building argument `group' isn't a valid building group")?;
+            let group = argi
+                .next()
+                .ok_or("ulocate building missing argument `group'")?;
+            let group = expect_identifier(
+                group,
+                "ulocate building argument `group' must be an identifier",
+            )?;
+            let group = group
+                .parse()
+                .map_err(|_| "ulocate building argument `group' isn't a valid building group")?;
 
-            let enemy = argi.next().ok_or("ulocate building missing argument `enemy'")?;
-            let (enemy, newins) = make_not_string(ctx, enemy, "ulocate building argument `enemy' cannot be a string")?;
+            let enemy = argi
+                .next()
+                .ok_or("ulocate building missing argument `enemy'")?;
+            let (enemy, newins) = make_not_string(
+                ctx,
+                enemy,
+                "ulocate building argument `enemy' cannot be a string",
+            )?;
             ins.extend(newins);
 
-            let building = argi.next().ok_or("ulocate building missing argument `building'")?;
-            let building = expect_identifier(building, "ulocate building argument `building' must be an identifier")?;
+            let building = argi
+                .next()
+                .ok_or("ulocate building missing argument `building'")?;
+            let building = expect_identifier(
+                building,
+                "ulocate building argument `building' must be an identifier",
+            )?;
             let building = make_variable(building);
 
-            UnitLocateSI::Building { group, enemy, building }
-        },
+            UnitLocateSI::Building {
+                group,
+                enemy,
+                building,
+            }
+        }
         invalid => return Err(format!("Unknown ulocate subcommand `{invalid}'")),
     };
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to ulocate subcommand `{}'",
-                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
-            );
+        return Err(format!(
+            "{} extra argument{} to ulocate subcommand `{}'",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" },
+            *subcommand
+        ));
     }
 
-    ins.push(Ins::UnitLocate { outx, outy, found: ret_or_null(ctx, ret), subcommand: subcmd });
+    ins.push(Ins::UnitLocate {
+        outx,
+        outy,
+        found: ret_or_null(ctx, ret),
+        subcommand: subcmd,
+    });
     Ok(ins)
 }
 
@@ -1218,74 +1434,92 @@ fn ucontrol_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
             // Lets hope this won't blow up T_T
             notstr!(move, x, y);
             UnitControlSI::Move { x, y }
-        },
+        }
         "approach" => {
             notstr!(approach, x, y, radius);
             UnitControlSI::Approach { x, y, radius }
-        },
+        }
         "boost" => {
             notstr!(boost, boost);
             UnitControlSI::Boost(boost)
-        },
+        }
         "pathfind" => UnitControlSI::Pathfind,
         "target" => {
             notstr!(target, x, y, shoot);
             UnitControlSI::Target { x, y, shoot }
-        },
+        }
         "targetp" => {
             ident!(targetp, unit);
             notstr!(targetp, shoot);
             UnitControlSI::Targetp { unit, shoot }
-        },
+        }
         "itemdrop" => {
             ident!(itemdrop, to);
             notstr!(itemdrop, amount);
             UnitControlSI::ItemDrop { to, amount }
-        },
+        }
         "itemtake" => {
             ident!(itemtake, from);
             atident!(itetake, item);
             notstr!(itemtake, amount);
             UnitControlSI::ItemTake { from, item, amount }
-        },
+        }
         "paydrop" => UnitControlSI::PayDrop,
         "paytake" => {
             notstr!(paytake, takeunits);
             UnitControlSI::PayTake(takeunits)
-        },
+        }
         "mine" => {
             notstr!(mine, x, y);
             UnitControlSI::Mine { x, y }
-        },
+        }
         "flag" => {
             notstr!(flag, value);
             UnitControlSI::Flag(value)
-        },
+        }
         "build" => {
             notstr!(build, x, y);
             atident!(build, block);
             notstr!(build, rotation);
             ident!(build, config);
-            UnitControlSI::Build { x, y, block, rotation, config }
-        },
+            UnitControlSI::Build {
+                x,
+                y,
+                block,
+                rotation,
+                config,
+            }
+        }
         "getblock" => {
             notstr!(getblock, x, y);
             ident!(getblock, building_type, building);
-            UnitControlSI::GetBlock { x, y, building_type, building }
-        },
+            UnitControlSI::GetBlock {
+                x,
+                y,
+                building_type,
+                building,
+            }
+        }
         "within" => {
             notstr!(within, x, y, radius);
             ident!(within, result);
-            UnitControlSI::Within { x, y, radius, result }
-        },
+            UnitControlSI::Within {
+                x,
+                y,
+                radius,
+                result,
+            }
+        }
         invalid => return Err(format!("Unknown ucontrol subcommand `{invalid}'")),
     };
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to ucontrol subcommand `{}'",
-                argi.len(), if argi.len() > 1 { "s" } else { "" }, *subcommand)
-            );
+        return Err(format!(
+            "{} extra argument{} to ucontrol subcommand `{}'",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" },
+            *subcommand
+        ));
     }
 
     ins.push(Ins::UnitControl(subcmd));
@@ -1298,20 +1532,28 @@ fn read_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
 
     let cell = argi.next().ok_or("read missing argument `cell'")?;
-    let cell = make_variable(expect_identifier(cell, "read argument `cell' must be an identifier")?);
+    let cell = make_variable(expect_identifier(
+        cell,
+        "read argument `cell' must be an identifier",
+    )?);
 
     let at = argi.next().ok_or("read missing argument `at'")?;
     let (at, newins) = make_not_string(ctx, at, "read argument `at' cannot be a string")?;
     ins.extend(newins);
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to read",
-                argi.len(), if argi.len() > 1 { "s" } else { "" })
-            );
+        return Err(format!(
+            "{} extra argument{} to read",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" }
+        ));
     }
 
-    ins.push(Ins::Read { at, cell, result: ret_or_null(ctx, ret) });
+    ins.push(Ins::Read {
+        at,
+        cell,
+        result: ret_or_null(ctx, ret),
+    });
 
     Ok(ins)
 }
@@ -1322,7 +1564,10 @@ fn write_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     let mut ins = Vec::new();
 
     let to = argi.next().ok_or("read missing argument `to'")?;
-    let to = make_variable(expect_identifier(to, "write argument `to' must be an identifier")?);
+    let to = make_variable(expect_identifier(
+        to,
+        "write argument `to' must be an identifier",
+    )?);
 
     let at = argi.next().ok_or("read missing argument `at'")?;
     let (at, newins) = make_not_string(ctx, at, "write argument `at' cannot be a string")?;
@@ -1333,14 +1578,22 @@ fn write_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
     ins.extend(newins);
 
     if argi.len() > 0 {
-        return Err(
-            format!("{} extra argument{} to write",
-                argi.len(), if argi.len() > 1 { "s" } else { "" })
-            );
+        return Err(format!(
+            "{} extra argument{} to write",
+            argi.len(),
+            if argi.len() > 1 { "s" } else { "" }
+        ));
     }
 
-    ins.push(Ins::Write { to, at, value: value.clone() });
-    ins.push(Ins::Set { variable: ret_or_null(ctx, ret), value });
+    ins.push(Ins::Write {
+        to,
+        at,
+        value: value.clone(),
+    });
+    ins.push(Ins::Set {
+        variable: ret_or_null(ctx, ret),
+        value,
+    });
 
     Ok(ins)
 }
@@ -1372,8 +1625,10 @@ fn drawflush_function(ctx: Ctx) -> Result<Ins, String> {
         1 => {
             let display = expect_identifier(&args[0], "drawflush argument must be an identifier")?;
             Ok(Ins::DrawFlush(make_variable(display)))
-        },
-        count => Err(format!("drawflush accepts no arguments or one argument, not {count}"))
+        }
+        count => Err(format!(
+            "drawflush accepts no arguments or one argument, not {count}"
+        )),
     }
 }
 
@@ -1386,8 +1641,14 @@ fn sleep_function(ctx: Ctx) -> Result<Vec<Ins>, String> {
 
     let mut ins = Vec::with_capacity(5);
 
-    let (duration, newins) = make_not_string(ctx, &args[0], "sleep argument `duration' cannot be a string")?;
-    let additional_time: u16 = newins.iter().fold(0, |a, i| a.saturating_add(i.size().try_into().unwrap()));
+    let (duration, newins) = make_not_string(
+        ctx,
+        &args[0],
+        "sleep argument `duration' cannot be a string",
+    )?;
+    let additional_time: u16 = newins
+        .iter()
+        .fold(0, |a, i| a.saturating_add(i.size().try_into().unwrap()));
     ins.extend(newins);
 
     let end_time = generate_variable(ctx);

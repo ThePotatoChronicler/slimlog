@@ -1,21 +1,19 @@
 use super::{
     ast::*,
     common::Span,
+    compilation::compile_statement,
+    context::Ctx,
     instructions::{
         self,
         Arg::{self, *},
-        Vartype,
-        Ins,
-        Type
+        Ins, Type, Vartype,
     },
-    compilation::compile_statement,
-    context::Ctx
 };
 
 pub fn expect_identifier<'a, 'b>(arg: &'a Argument, err: &'b str) -> Result<Span<'a>, String> {
     match arg {
         Argument::Identifier(span) => Ok(*span),
-        _ => Err(err.into())
+        _ => Err(err.into()),
     }
 }
 
@@ -80,7 +78,7 @@ pub fn make_generic(ctx: Ctx, arg: &Argument) -> Result<(Arg, Vec<Ins>), String>
     Ok((newarg, ins))
 }
 
-pub fn make_num<T : Into<f64>>(n: T) -> Arg {
+pub fn make_num<T: Into<f64>>(n: T) -> Arg {
     Arg::Literal(Type::Num(n.into()))
 }
 
@@ -129,6 +127,6 @@ pub fn generate_label(ctx: Ctx) -> usize {
 pub fn ret_or_null(ctx: Ctx, ret: Option<&Vartype>) -> Arg {
     match ret {
         Some(s) => Variable(s.clone()),
-        None => null(ctx)
+        None => null(ctx),
     }
 }

@@ -22,7 +22,7 @@ use super::{
 type IResult<'a, 'b> = nom::IResult<Span<'a>, Span<'b>>;
 
 /// Automatically converts input to a Span before passing it off to inner_tokenize
-pub fn tokenize(input: &str) -> Result<ast::Statement, ParserError>{
+pub fn tokenize(input: &str) -> Result<ast::Statement<'_>, ParserError<'_>>{
     inner_tokenize(Span::new(input))
 }
 

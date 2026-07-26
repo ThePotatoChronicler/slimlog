@@ -1,0 +1,4 @@
+(do
+    (if x (print "Hello, world"))
+    (printflush message1)
+)

@@ -44,7 +44,7 @@ impl Context {
     }
 
     /// Creates an empty child Ctx
-    pub fn create_empty_ctx(&self) -> Ctx {
+    pub fn create_empty_ctx(&self) -> Ctx<'_, '_, '_> {
         Ctx {
             args: &[],
             ret: None,

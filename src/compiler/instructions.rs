@@ -1,13 +1,6 @@
-use std::{
-    str::FromStr,
-    borrow::Cow,
-    collections::HashMap,
-    rc::Rc,
-};
+use super::settings::Settings;
 use rand::rngs::StdRng;
-use super::{
-    settings::Settings,
-};
+use std::{borrow::Cow, collections::HashMap, rc::Rc, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
@@ -53,12 +46,15 @@ pub enum Ins {
     /// printflush message
     PrintFlush(Arg),
     /// getlink store, index
-    GetLink { store: Arg, index: Arg },
+    GetLink {
+        store: Arg,
+        index: Arg,
+    },
     /// control subcommand target
     /*       v-- target*/
     Control {
         target: Arg,
-        subcommand: ControlSI
+        subcommand: ControlSI,
     },
     /// radar from order result sort prop prop prop
     Radar {
@@ -67,25 +63,25 @@ pub enum Ins {
         order: Arg,
         result: Arg,
         sort: TargetSort,
-        conds: [TargetProp; 3]
+        conds: [TargetProp; 3],
     },
     /// sensor result target sensable
     Sensor {
         result: Arg,
         target: Arg,
-        sensable: Arg
+        sensable: Arg,
     },
     /// set variable value
     Set {
         variable: Arg,
-        value: Arg
+        value: Arg,
     },
     /// op operation result left right
     Op {
         op: Operation,
         result: Arg,
         left: Arg,
-        right: Arg
+        right: Arg,
     },
     /// end
     End,
@@ -94,7 +90,7 @@ pub enum Ins {
         label: Label,
         cmp: Comparison,
         left: Arg,
-        right: Arg
+        right: Arg,
     },
     /// ubind type
     UnitBind(Arg),
@@ -105,14 +101,14 @@ pub enum Ins {
         order: Arg,
         result: Arg,
         sort: TargetSort,
-        conds: [TargetProp; 3]
+        conds: [TargetProp; 3],
     },
     /// ulocate subcommand ...
     UnitLocate {
         outx: Arg,
         outy: Arg,
         found: Arg,
-        subcommand: UnitLocateSI
+        subcommand: UnitLocateSI,
     },
     /// noop
     Noop,
@@ -121,36 +117,21 @@ pub enum Ins {
      *   Onwards are pseudo-instructions, which do not exist
      *   in mlog, and are used as a crutch by slimlog
      */
-
     Label(Label),
     /// Passed-through exactly as it is
-    _Raw(String)
+    _Raw(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DrawSI {
     /// clear r, g, b
-    Clear {
-        r: Arg,
-        g: Arg,
-        b: Arg,
-    },
+    Clear { r: Arg, g: Arg, b: Arg },
     /// color r, g, b, a
-    Color {
-        r: Arg,
-        g: Arg,
-        b: Arg,
-        a: Arg,
-    },
+    Color { r: Arg, g: Arg, b: Arg, a: Arg },
     /// stroke width
     Stroke(Arg),
     /// line x1, y1, x2, y2
-    Line {
-        x1: Arg,
-        y1: Arg,
-        x2: Arg,
-        y2: Arg,
-    },
+    Line { x1: Arg, y1: Arg, x2: Arg, y2: Arg },
     /// rect x, y, w, h
     Rect {
         x: Arg,
@@ -197,7 +178,7 @@ pub enum DrawSI {
         image: Arg,
         size: Arg,
         rotation: Arg,
-    }
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -205,24 +186,13 @@ pub enum ControlSI {
     /// enabled target enabled
     Enabled(Arg),
     /// shoot turret, x, y, shoot
-    Shoot {
-        x: Arg,
-        y: Arg,
-        shoot: Arg
-    },
+    Shoot { x: Arg, y: Arg, shoot: Arg },
     /// shootp turret, unit, shoot
-    Shootp {
-        unit: Arg,
-        shoot: Arg
-    },
+    Shootp { unit: Arg, shoot: Arg },
     /// configure building configuration
     Configure(Arg),
     /// color illuminator r g b
-    Color {
-        r: Arg,
-        g: Arg,
-        b: Arg
-    }
+    Color { r: Arg, g: Arg, b: Arg },
 }
 
 /// Target Property
@@ -235,7 +205,7 @@ pub enum TargetProp {
     Attacker,
     Flying,
     Boss,
-    Ground
+    Ground,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -244,7 +214,7 @@ pub enum TargetSort {
     Health,
     Shield,
     Armor,
-    MaxHealth
+    MaxHealth,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -284,7 +254,7 @@ pub enum Operation {
     Floor,
     Ceil,
     Sqrt,
-    Rand
+    Rand,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -296,7 +266,7 @@ pub enum Comparison {
     GreaterThan,
     GreaterOrEqual,
     StrictEquals,
-    Always
+    Always,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -368,7 +338,7 @@ pub enum UnitLocateSI {
         enemy: Arg,
         building: Arg,
     },
-    Spawn(Arg), // Return
+    Spawn(Arg),   // Return
     Damaged(Arg), // Return
 }
 
@@ -433,7 +403,7 @@ impl From<Operation> for &'static str {
             Floor => "floor",
             Ceil => "ceil",
             Sqrt => "sqrt",
-            Rand => "rand"
+            Rand => "rand",
         }
     }
 }
@@ -479,7 +449,7 @@ impl FromStr for Operation {
             "ceil" => Ceil,
             "sqrt" => Sqrt,
             "rand" => Rand,
-            _ => return Err(())
+            _ => return Err(()),
         })
     }
 }
@@ -488,7 +458,10 @@ impl Operation {
     /// Returns true if operation is unary
     pub fn unary(self) -> bool {
         use Operation::*;
-        matches!(self, Flip | Abs | Log | Log10 | Sin | Cos | Tan | Floor | Ceil | Sqrt | Rand)
+        matches!(
+            self,
+            Flip | Abs | Log | Log10 | Sin | Cos | Tan | Floor | Ceil | Sqrt | Rand
+        )
     }
 }
 
@@ -503,7 +476,7 @@ impl TryFrom<Operation> for Comparison {
             Operation::GreaterThan => Comparison::GreaterThan,
             Operation::GreaterOrEqual => Comparison::GreaterOrEqual,
             Operation::StrictEquals => Comparison::StrictEquals,
-            _ => return Err(())
+            _ => return Err(()),
         })
     }
 }
@@ -519,7 +492,7 @@ impl TryFrom<Comparison> for Operation {
             Comparison::GreaterThan => Operation::GreaterThan,
             Comparison::GreaterOrEqual => Operation::GreaterOrEqual,
             Comparison::StrictEquals => Operation::StrictEquals,
-            _ => return Err(())
+            _ => return Err(()),
         })
     }
 }
@@ -530,7 +503,7 @@ impl Ins {
         use Ins::*;
         match self {
             Label(_) => 0,
-            _ => 1
+            _ => 1,
         }
     }
 }
@@ -546,29 +519,23 @@ impl From<Comparison> for &'static str {
             GreaterThan => "greaterThan",
             GreaterOrEqual => "greaterThanEq",
             StrictEquals => "strictEqual",
-            Always => "always"
+            Always => "always",
         }
     }
 }
 
 impl Arg {
-
     /// Displays an Arg
     pub fn display<'a, 't>(
         &'a self,
         rng: &'t mut StdRng,
         map: &'t mut HashMap<usize, String>,
-        settings: &'t Settings)
-        -> Cow<'a, str>
-    {
+        settings: &'t Settings,
+    ) -> Cow<'a, str> {
         match self {
-            Arg::Literal(t) => {
-                match t {
-                    Type::Num(f) => {
-                        Cow::Owned(f.to_string())
-                    },
-                    Type::Str(s) => Cow::Borrowed(s)
-                }
+            Arg::Literal(t) => match t {
+                Type::Num(f) => Cow::Owned(f.to_string()),
+                Type::Str(s) => Cow::Borrowed(s),
             },
             Arg::Variable(v) => match v {
                 Vartype::Named(s) => Cow::Borrowed(s),
@@ -597,7 +564,7 @@ impl Arg {
                         Cow::Owned(format!("__{}", n))
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -614,13 +581,13 @@ impl Comparison {
             GreaterThan => LessOrEqual,
             GreaterOrEqual => LessThan,
             StrictEquals => {
-                log::warn!(
-                    concat!("Negating StrictEquals into NotEquals may cause",
-                        "unintented consequences. This may have been invoked by an optimization")
-                    );
+                log::warn!(concat!(
+                    "Negating StrictEquals into NotEquals may cause",
+                    "unintented consequences. This may have been invoked by an optimization"
+                ));
                 NotEquals
-            },
-            Always => return None
+            }
+            Always => return None,
         })
     }
 }
@@ -635,7 +602,7 @@ impl FromStr for TargetSort {
             "health" => Health,
             "maxhealth" => MaxHealth,
             "shield" => Shield,
-            _ => return Err(())
+            _ => return Err(()),
         })
     }
 }
@@ -648,14 +615,15 @@ impl From<TargetSort> for &'static str {
             Health => "health",
             Shield => "shield",
             Armor => "armor",
-            MaxHealth => "maxHealth"
+            MaxHealth => "maxHealth",
         }
     }
 }
 
 impl std::fmt::Display for TargetSort {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_str((*self).into()).expect("Failed to write to Formatter");
+        f.write_str((*self).into())
+            .expect("Failed to write to Formatter");
         Ok(())
     }
 }
@@ -673,7 +641,7 @@ impl FromStr for TargetProp {
             "flying" => Flying,
             "boss" => Boss,
             "ground" => Ground,
-            _ => return Err(())
+            _ => return Err(()),
         })
     }
 }
@@ -689,14 +657,15 @@ impl From<TargetProp> for &'static str {
             Attacker => "attacker",
             Flying => "flying",
             Boss => "boss",
-            Ground => "ground"
+            Ground => "ground",
         }
     }
 }
 
 impl std::fmt::Display for TargetProp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_str((*self).into()).expect("Failed to write to Formatter");
+        f.write_str((*self).into())
+            .expect("Failed to write to Formatter");
         Ok(())
     }
 }
